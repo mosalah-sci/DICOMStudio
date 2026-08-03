@@ -2,16 +2,29 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Sequence
+
 from PySide6.QtCore import QSize, Qt
+from PySide6.QtGui import QAction
 from PySide6.QtWidgets import QMainWindow, QMenu, QMenuBar, QToolBar
 
+from dicomviewer.domain.image_processing import WindowPreset
 from dicomviewer.presentation.actions.action_catalog import ActionCatalog
 from dicomviewer.presentation.actions.action_ids import ActionId
 from dicomviewer.shared.constants import TOOLBAR_ICON_SIZE
 
 
-def populate_menu_bar(menu_bar: QMenuBar, catalog: ActionCatalog) -> None:
-    """Populate the standard application menus from the catalog."""
+def populate_menu_bar(
+    menu_bar: QMenuBar,
+    catalog: ActionCatalog,
+    window_presets: Sequence[WindowPreset] = (),
+    on_window_preset: Callable[[WindowPreset], None] | None = None,
+) -> tuple[QAction, ...]:
+    """Populate the standard application menus from the catalog.
+
+    Returns the preset actions so callers can enable or disable them based on
+    loaded content.
+    """
     file_menu = menu_bar.addMenu("&File")
     _add(file_menu, catalog, ActionId.OPEN_FOLDER)
     _add(file_menu, catalog, ActionId.OPEN_FILES)
@@ -30,6 +43,7 @@ def populate_menu_bar(menu_bar: QMenuBar, catalog: ActionCatalog) -> None:
 
     tools_menu = menu_bar.addMenu("&Tools")
     _add(tools_menu, catalog, ActionId.WINDOW_LEVEL)
+    preset_actions = _add_window_presets(tools_menu, window_presets, on_window_preset)
     _add(tools_menu, catalog, ActionId.MEASURE)
     _add(tools_menu, catalog, ActionId.SCREENSHOT)
 
@@ -42,6 +56,27 @@ def populate_menu_bar(menu_bar: QMenuBar, catalog: ActionCatalog) -> None:
 
     help_menu = menu_bar.addMenu("&Help")
     _add(help_menu, catalog, ActionId.ABOUT)
+    return preset_actions
+
+
+def _add_window_presets(
+    tools_menu: QMenu,
+    presets: Sequence[WindowPreset],
+    on_window_preset: Callable[[WindowPreset], None] | None,
+) -> tuple[QAction, ...]:
+    """Add a Window Presets submenu, returning its actions."""
+    if not presets:
+        return ()
+    submenu = tools_menu.addMenu("Window &Presets")
+    actions: list[QAction] = []
+    for preset in presets:
+        action = QAction(preset.name, submenu)
+        action.setStatusTip(f"Apply the {preset.name} window/level preset")
+        if on_window_preset is not None:
+            action.triggered.connect(lambda _checked=False, p=preset: on_window_preset(p))
+        submenu.addAction(action)
+        actions.append(action)
+    return tuple(actions)
 
 
 def create_toolbar(main_window: QMainWindow, catalog: ActionCatalog) -> QToolBar:

@@ -24,7 +24,7 @@ def _sample_tree() -> StudyTree:
 
 def test_main_window_has_expected_title(make_window: Callable[..., MainWindow]) -> None:
     window = make_window()
-    assert window.windowTitle() == "DICOM Viewer Professional - v0.4.0"
+    assert window.windowTitle() == "DICOM Viewer Professional - v0.5.0"
 
 
 def test_main_window_shows_an_empty_state(make_window: Callable[..., MainWindow]) -> None:
@@ -160,3 +160,33 @@ def test_viewer_actions_are_disabled_without_content(
     window = make_window()
     assert not window.action(ActionId.ZOOM_IN).isEnabled()
     assert not window.action(ActionId.RESET_VIEW).isEnabled()
+    assert all(not action.isEnabled() for action in window._preset_actions)
+
+
+def test_window_preset_menu_exists(make_window: Callable[..., MainWindow]) -> None:
+    window = make_window()
+    assert window._preset_actions
+    assert any(action.text() == "CT Lung" for action in window._preset_actions)
+
+
+def test_applying_a_window_preset_updates_the_viewer(
+    make_window: Callable[..., MainWindow],
+    qapp: QApplication,
+    tmp_path: Path,
+) -> None:
+    scanner = FakeStudyScanner(tree=_sample_tree())
+    window = make_window(study_scanner=scanner)
+    folder = tmp_path / "studies"
+    folder.mkdir()
+    window._start_scan(folder)
+    panel = window._study_explorer_panel
+    assert pump_until(qapp, lambda: panel._stack.currentIndex() == 3)
+    series_item = panel._tree.topLevelItem(0).child(0).child(0)
+    panel._tree.itemActivated.emit(series_item, 0)
+    assert window._viewer_panel.has_image
+    assert all(action.isEnabled() for action in window._preset_actions)
+    lung = next(action for action in window._preset_actions if action.text() == "CT Lung")
+    lung.trigger()
+    assert window._viewer_panel._viewer.viewport.window_center == -500.0
+    assert window._viewer_panel._viewer.viewport.window_width == 1500.0
+    assert "CT Lung" in window.statusBar().currentMessage()

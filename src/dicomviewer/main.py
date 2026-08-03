@@ -17,6 +17,7 @@ from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication
 
 from dicomviewer import __version__
+from dicomviewer.application.processing import ProcessingPipeline
 from dicomviewer.application.theme_manager import ThemeManager
 from dicomviewer.domain.settings import SettingsError
 from dicomviewer.infrastructure.configuration.settings_service import build_settings_service
@@ -26,6 +27,7 @@ from dicomviewer.infrastructure.dicom.thumbnail_service import PydicomThumbnailS
 from dicomviewer.infrastructure.logging.setup import configure_logging
 from dicomviewer.infrastructure.persistence.app_paths import AppPaths
 from dicomviewer.infrastructure.persistence.window_state_store import JsonWindowStateStore
+from dicomviewer.infrastructure.processing.analyzer import NumpyImageAnalyzer
 from dicomviewer.infrastructure.rendering.renderer import NumpyViewRenderer
 from dicomviewer.presentation.theme.icon_provider import IconProvider
 from dicomviewer.presentation.theme.theme_controller import ThemeController
@@ -87,7 +89,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         study_scanner=PydicomStudyScanner(),
         thumbnail_service=PydicomThumbnailService(),
         pixel_decoder=PydicomPixelDecoder(),
-        view_renderer=NumpyViewRenderer(),
+        view_renderer=NumpyViewRenderer(processing_pipeline=ProcessingPipeline(())),
+        image_analyzer=NumpyImageAnalyzer(),
     )
     theme_controller.apply_current()
     window.show()

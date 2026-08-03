@@ -5,6 +5,31 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.5.0] - 2026-08-04
+
+### Added
+
+- Diagnostic Image Processing:
+  - Clinical window presets (CT Brain, Stroke, Bone, Lung, Abdomen,
+    Mediastinum, Soft Tissue, Temporal Bones) with a Window Presets submenu;
+    presets apply instantly and are disabled until a series is loaded.
+  - Pixel statistics (minimum, maximum, mean, standard deviation, count)
+    computed over rescaled values and shown in the viewer overlay.
+  - Fixed-bin histogram calculation with live mini histogram rendering in the
+    viewer corner.
+  - Non-destructive image processing pipeline abstraction: ordered, composable
+    stages that never mutate the source pixels, designed so future filters
+    (for example AI-based) plug in at composition time without renderer
+    changes.
+  - Numpy image analyzer service behind an application port (`ImageAnalyzer`)
+    so the Presentation layer performs no image math.
+  - Bounded per-slice render cache reusing RGBA frames for unchanged
+    window/level state, reducing repeated work while interacting.
+  - VOI LUT / window-level pipeline extended and formalized; rescale,
+    MONOCHROME1/2 inversion and automatic window behaviour preserved from
+    Milestone 4.
+  - Application version bumped to 0.5.0.
+
 ## [0.4.0] - 2026-08-04
 
 ### Added

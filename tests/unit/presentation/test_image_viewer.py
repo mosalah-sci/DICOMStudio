@@ -7,9 +7,10 @@ from pathlib import Path
 from PySide6.QtCore import QPoint, QPointF, Qt
 from PySide6.QtGui import QWheelEvent
 from PySide6.QtTest import QTest
-from tests.dicom_utils import FakePixelDecoder, FakeViewRenderer
+from tests.dicom_utils import FakeImageAnalyzer, FakePixelDecoder, FakeViewRenderer
 
 from dicomviewer.application.viewing import UnsupportedPixelFormatError
+from dicomviewer.domain.image_processing import WindowPreset
 from dicomviewer.domain.studies import Image
 from dicomviewer.domain.viewport import FitMode
 from dicomviewer.presentation.widgets.image_viewer import ImageViewerWidget
@@ -22,12 +23,14 @@ def _series(count: int = 3) -> tuple[Image, ...]:
 def _viewer(
     decoder: FakePixelDecoder | None = None,
     renderer: FakeViewRenderer | None = None,
+    analyzer: FakeImageAnalyzer | None = None,
     max_cache: int = 3,
 ) -> ImageViewerWidget:
     return ImageViewerWidget(
         None,
         decoder or FakePixelDecoder(),
         renderer or FakeViewRenderer(),
+        analyzer=analyzer or FakeImageAnalyzer(),
         max_cache=max_cache,
     )
 
@@ -246,3 +249,83 @@ def test_empty_series_shows_empty(qapp) -> None:
     viewer.load_series(())
     assert not viewer.has_image
     assert changes == [False]
+
+
+def test_set_window_applies_and_emits(qapp) -> None:
+    viewer = _viewer()
+    viewer.load_series(_series())
+    windows: list[tuple[object, float]] = []
+    viewer.window_level_changed.connect(lambda c, w: windows.append((c, w)))
+    viewer.set_window(40.0, 400.0)
+    assert viewer.viewport.window_center == 40.0
+    assert viewer.viewport.window_width == 400.0
+    assert windows[-1] == (40.0, 400.0)
+
+
+def test_apply_preset_sets_the_window(qapp) -> None:
+    viewer = _viewer()
+    viewer.load_series(_series())
+    viewer.apply_preset(WindowPreset("CT Lung", -500.0, 1500.0))
+    assert viewer.viewport.window_center == -500.0
+    assert viewer.viewport.window_width == 1500.0
+
+
+def test_set_window_with_auto_width_resets(qapp) -> None:
+    viewer = _viewer()
+    viewer.load_series(_series())
+    viewer.set_window(40.0, 400.0)
+    viewer.set_window(40.0, 0.0)
+    assert viewer.viewport.window_center is None
+    assert viewer.viewport.window_width == 0.0
+
+
+def test_statistics_are_available_after_loading(qapp) -> None:
+    analyzer = FakeImageAnalyzer()
+    viewer = _viewer(analyzer=analyzer)
+    viewer.load_series(_series())
+    assert viewer.statistics is not None
+    assert viewer.statistics.mean == 127.5
+    assert analyzer.statistics_calls
+    assert viewer.histogram is not None
+    assert viewer.histogram.bin_count == 2
+    assert analyzer.histogram_calls
+    assert analyzer.histogram_calls[0][1] == 128
+
+
+def test_analysis_is_cached_per_slice(qapp) -> None:
+    analyzer = FakeImageAnalyzer()
+    viewer = _viewer(analyzer=analyzer)
+    viewer.load_series(_series(count=2))
+    assert viewer.statistics is not None
+    assert viewer.statistics is not None
+    assert len(analyzer.statistics_calls) == 1
+    viewer.set_slice(1)
+    assert viewer.statistics is not None
+    assert len(analyzer.statistics_calls) == 2
+
+
+def test_no_analysis_without_pixels(qapp) -> None:
+    viewer = _viewer()
+    viewer.load_series(())
+    assert viewer.statistics is None
+    assert viewer.histogram is None
+
+
+def test_render_cache_reuses_frames_for_same_window(qapp) -> None:
+    renderer = FakeViewRenderer()
+    viewer = _viewer(renderer=renderer)
+    viewer.load_series(_series())
+    assert len(renderer.calls) == 1
+    viewer.set_slice(1)
+    assert len(renderer.calls) == 2
+    viewer.set_slice(0)
+    assert len(renderer.calls) == 2
+
+
+def test_render_cache_is_bounded(qapp) -> None:
+    renderer = FakeViewRenderer()
+    viewer = _viewer(renderer=renderer, max_cache=3)
+    viewer.load_series(_series(count=5))
+    for index in range(5):
+        viewer.set_slice(index)
+    assert len(viewer._frame_cache) <= 3

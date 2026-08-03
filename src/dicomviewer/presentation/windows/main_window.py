@@ -10,8 +10,10 @@ from PySide6.QtGui import QAction, QCloseEvent
 from PySide6.QtWidgets import QDockWidget, QFileDialog, QMainWindow, QWidget
 
 from dicomviewer.application.discovery import StudyScanner, ThumbnailService
+from dicomviewer.application.processing import ImageAnalyzer
 from dicomviewer.application.viewing import PixelDecoder, ViewRenderer
 from dicomviewer.application.window_state_store import WindowState, WindowStateStore
+from dicomviewer.domain.image_processing import WINDOW_PRESETS, WindowPreset
 from dicomviewer.domain.studies import Series, StudyTree
 from dicomviewer.presentation.actions.action_catalog import ActionCatalog
 from dicomviewer.presentation.actions.action_ids import ActionId
@@ -79,6 +81,7 @@ class MainWindow(QMainWindow):
         thumbnail_service: ThumbnailService,
         pixel_decoder: PixelDecoder,
         view_renderer: ViewRenderer,
+        image_analyzer: ImageAnalyzer,
         error_presenter: ErrorPresenter | None = None,
         parent: QWidget | None = None,
     ) -> None:
@@ -93,10 +96,12 @@ class MainWindow(QMainWindow):
         self._thumbnail_service = thumbnail_service
         self._pixel_decoder = pixel_decoder
         self._view_renderer = view_renderer
+        self._image_analyzer = image_analyzer
         self._scan_thread: QThread | None = None
         self._scan_worker: StudyScanWorker | None = None
         self._scan_relay: _ScanRelay | None = None
         self._scan_generation = 0
+        self._preset_actions: tuple[QAction, ...] = ()
         self._error_presenter = error_presenter or ErrorPresenter()
 
         self.setWindowTitle(f"{app_name} - v{version}")
@@ -107,7 +112,12 @@ class MainWindow(QMainWindow):
         self._catalog = self._build_catalog()
         self._status_bar = StatusBar(version)
         self.setStatusBar(self._status_bar)
-        populate_menu_bar(self.menuBar(), self._catalog)
+        self._preset_actions = populate_menu_bar(
+            self.menuBar(),
+            self._catalog,
+            window_presets=WINDOW_PRESETS,
+            on_window_preset=self._apply_window_preset,
+        )
         self.addToolBar(create_toolbar(self, self._catalog))
 
         self._capture_default_layout()
@@ -156,6 +166,7 @@ class MainWindow(QMainWindow):
             self._icon_provider,
             decoder=self._pixel_decoder,
             renderer=self._view_renderer,
+            analyzer=self._image_analyzer,
         )
         self._viewer_panel.content_changed.connect(self._sync_viewer_actions)
         self._viewer_panel.zoom_changed.connect(self._on_zoom_changed)
@@ -312,6 +323,11 @@ class MainWindow(QMainWindow):
             f"Loaded {series.modality or 'series'} with {series.image_count} images."
         )
 
+    def _apply_window_preset(self, preset: WindowPreset) -> None:
+        """Apply a named clinical window preset to the viewer."""
+        self._viewer_panel.apply_preset(preset)
+        self._status_bar.showMessage(f"Window preset: {preset.name}")
+
     def _sync_viewer_actions(self, has_image: bool) -> None:
         """Enable or disable the view actions based on loaded content."""
         for action_id in (
@@ -322,6 +338,8 @@ class MainWindow(QMainWindow):
             ActionId.WINDOW_LEVEL,
         ):
             self._catalog.action(action_id).setEnabled(has_image)
+        for action in self._preset_actions:
+            action.setEnabled(has_image)
 
     def _on_zoom_changed(self, zoom: float) -> None:
         """Report the current zoom level in the status bar."""

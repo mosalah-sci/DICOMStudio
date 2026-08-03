@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 
+from dicomviewer.application.processing import ProcessingPipeline
 from dicomviewer.application.viewing import (
     PixelArray,
     RenderedImage,
@@ -15,6 +16,14 @@ from dicomviewer.infrastructure.rendering import pipeline
 
 class NumpyViewRenderer:
     """Renders decoded frames to RGBA using the modular numpy pipeline."""
+
+    def __init__(self, processing_pipeline: ProcessingPipeline | None = None) -> None:
+        """Create a renderer, optionally applying ``processing_pipeline``.
+
+        The pipeline runs on the normalized float frame before conversion to
+        RGBA; future filters plug in here without changing the renderer.
+        """
+        self._processing_pipeline = processing_pipeline
 
     def render(self, pixels: PixelArray, viewport: Viewport) -> RenderedImage:
         """Return the full-resolution RGBA frame for ``pixels``."""
@@ -43,9 +52,17 @@ class NumpyViewRenderer:
         )
         normalized = pipeline.apply_window(rescaled, center, width)
         normalized = pipeline.apply_photometric(normalized, pixels.is_monochrome1)
+        normalized = self._apply_pipeline(normalized)
         return pipeline.to_rgba_grayscale(normalized)
 
     def _render_color(self, pixels: PixelArray) -> np.ndarray:
         """Render a color frame by normalizing its channels."""
         normalized = pipeline.normalize_color(pixels.pixels)
+        normalized = self._apply_pipeline(normalized)
         return pipeline.to_rgba_color(normalized)
+
+    def _apply_pipeline(self, frame: np.ndarray) -> np.ndarray:
+        """Run the injected processing pipeline, if any, over ``frame``."""
+        if self._processing_pipeline is None:
+            return frame
+        return self._processing_pipeline.apply(frame)

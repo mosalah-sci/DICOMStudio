@@ -8,6 +8,7 @@ import numpy as np
 from pydicom.dataset import Dataset, FileMetaDataset
 from pydicom.uid import ExplicitVRLittleEndian
 
+from dicomviewer.application.processing import Histogram, PixelStatistics
 from dicomviewer.application.viewing import PixelArray, RenderedImage
 from dicomviewer.domain.studies import Image, StudyTree
 from dicomviewer.domain.thumbnail import Thumbnail
@@ -111,6 +112,32 @@ class FakeViewRenderer:
             center = viewport.window_center if viewport.window_center is not None else 0.0
             return (center, viewport.window_width)
         return (50.0, 100.0)
+
+
+class FakeImageAnalyzer:
+    """ImageAnalyzer double returning fixed statistics and histograms."""
+
+    def __init__(
+        self,
+        statistics: PixelStatistics | None = None,
+        histogram: Histogram | None = None,
+    ) -> None:
+        self.statistics_result = statistics or PixelStatistics(
+            minimum=0.0, maximum=255.0, mean=127.5, standard_deviation=10.0, pixel_count=48
+        )
+        self.histogram_result = histogram or Histogram(
+            bin_count=2, minimum=0.0, maximum=255.0, counts=(24, 24)
+        )
+        self.statistics_calls: list[PixelArray] = []
+        self.histogram_calls: list[tuple[PixelArray, int]] = []
+
+    def statistics(self, pixels: PixelArray) -> PixelStatistics:
+        self.statistics_calls.append(pixels)
+        return self.statistics_result
+
+    def histogram(self, pixels: PixelArray, bins: int = 256) -> Histogram:
+        self.histogram_calls.append((pixels, bins))
+        return self.histogram_result
 
 
 def sample_pixel_array(width: int = 8, height: int = 6) -> PixelArray:

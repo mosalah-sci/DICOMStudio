@@ -14,6 +14,7 @@ from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QImage, QKeyEvent, QMouseEvent, QPainter, QPaintEvent, QWheelEvent
 from PySide6.QtWidgets import QWidget
 
+from dicomviewer.application.processing import Histogram, ImageAnalyzer, PixelStatistics
 from dicomviewer.application.viewing import (
     PixelArray,
     PixelDecoder,
@@ -22,6 +23,7 @@ from dicomviewer.application.viewing import (
     UnsupportedPixelFormatError,
     ViewRenderer,
 )
+from dicomviewer.domain.image_processing import WindowPreset
 from dicomviewer.domain.studies import Image
 from dicomviewer.domain.viewport import FitMode, Viewport, clamp_slice
 from dicomviewer.presentation.imaging.rendered_image import to_qimage
@@ -35,6 +37,9 @@ _WL_LEVEL_PER_PIXEL = 0.5
 _WL_WIDTH_PER_PIXEL = 0.5
 _WL_MIN_WIDTH = 1.0
 _DEFAULT_CACHE_SIZE = 3
+_HISTOGRAM_BINS = 128
+_HISTOGRAM_WIDTH = 120
+_HISTOGRAM_HEIGHT = 36
 
 
 class ImageViewerWidget(QWidget):
@@ -51,15 +56,19 @@ class ImageViewerWidget(QWidget):
         decoder: PixelDecoder,
         renderer: ViewRenderer,
         *,
+        analyzer: ImageAnalyzer,
         max_cache: int = _DEFAULT_CACHE_SIZE,
     ) -> None:
-        """Create a viewer backed by ``decoder`` and ``renderer``."""
+        """Create a viewer backed by ``decoder``, ``renderer`` and ``analyzer``."""
         super().__init__(parent)
         self._decoder = decoder
         self._renderer = renderer
+        self._analyzer = analyzer
         self._max_cache = max_cache
         self._images: tuple[Image, ...] = ()
         self._cache: dict[int, PixelArray] = {}
+        self._slice_analysis: dict[int, tuple[PixelStatistics, Histogram]] = {}
+        self._frame_cache: dict[tuple[int, float | None, float], RenderedImage] = {}
         self._viewport = Viewport.initial()
         self._rendered: RenderedImage | None = None
         self._qimage: QImage | None = None
@@ -96,6 +105,8 @@ class ImageViewerWidget(QWidget):
         """Load ``images`` and display the slice at ``index``."""
         self._images = tuple(images)
         self._cache.clear()
+        self._slice_analysis.clear()
+        self._frame_cache.clear()
         self._last_error = None
         self._viewport = Viewport(
             slice_index=clamp_slice(index, len(self._images)),
@@ -113,6 +124,8 @@ class ImageViewerWidget(QWidget):
         """Unload the series and return to the empty state."""
         self._images = ()
         self._cache.clear()
+        self._slice_analysis.clear()
+        self._frame_cache.clear()
         self._rendered = None
         self._qimage = None
         self._last_error = None
@@ -180,6 +193,29 @@ class ImageViewerWidget(QWidget):
         self._render_current()
         self.window_level_changed.emit(None, 0.0)
         self.update()
+
+    def set_window(self, center: float, width: float) -> None:
+        """Apply an explicit window (center, width) and re-render immediately."""
+        self._viewport = self._viewport.with_window(center, width)
+        self._render_current()
+        self.window_level_changed.emit(center, width)
+        self.update()
+
+    def apply_preset(self, preset: WindowPreset) -> None:
+        """Apply a named clinical window preset."""
+        self.set_window(preset.center, preset.width)
+
+    @property
+    def statistics(self) -> PixelStatistics | None:
+        """Return the statistics of the current slice, or ``None`` if unknown."""
+        analysis = self._analysis_for(self._viewport.slice_index)
+        return analysis[0] if analysis is not None else None
+
+    @property
+    def histogram(self) -> Histogram | None:
+        """Return the histogram of the current slice, or ``None`` if unknown."""
+        analysis = self._analysis_for(self._viewport.slice_index)
+        return analysis[1] if analysis is not None else None
 
     def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802
         """Begin a pan or window/level drag."""
@@ -333,6 +369,40 @@ class ImageViewerWidget(QWidget):
                     break
             else:
                 break
+        while len(self._slice_analysis) > self._max_cache:
+            for key in list(self._slice_analysis):
+                if key != self._viewport.slice_index:
+                    del self._slice_analysis[key]
+                    break
+            else:
+                break
+        while len(self._frame_cache) > self._max_cache:
+            oldest = next(iter(self._frame_cache))
+            if oldest[0] != self._viewport.slice_index:
+                del self._frame_cache[oldest]
+            else:
+                break
+
+    def _analysis_for(self, index: int) -> tuple[PixelStatistics, Histogram] | None:
+        """Return the cached analysis of ``index``, computing it on demand."""
+        cached = self._slice_analysis.get(index)
+        if cached is not None:
+            return cached
+        pixels = self._slice_pixels(index)
+        if pixels is None:
+            return None
+        try:
+            analysis = (
+                self._analyzer.statistics(pixels),
+                self._analyzer.histogram(pixels, bins=_HISTOGRAM_BINS),
+            )
+        except Exception as exc:
+            # Analysis is best-effort display metadata; a failure must not
+            # interrupt painting or decoding of the frame itself.
+            self._last_error = str(exc)
+            return None
+        self._slice_analysis[index] = analysis
+        return analysis
 
     def _render_current(self) -> None:
         """Decode and render the current slice, tolerating failures."""
@@ -341,11 +411,20 @@ class ImageViewerWidget(QWidget):
             self._rendered = None
             self._qimage = None
             return
-        try:
-            rendered = self._renderer.render(pixels, self._viewport)
-        except RenderingError as exc:
-            self._last_error = str(exc)
-            return
+        cache_key = (
+            self._viewport.slice_index,
+            self._viewport.window_center,
+            self._viewport.window_width,
+        )
+        rendered = self._frame_cache.get(cache_key)
+        if rendered is None:
+            try:
+                rendered = self._renderer.render(pixels, self._viewport)
+            except RenderingError as exc:
+                self._last_error = str(exc)
+                return
+            self._frame_cache[cache_key] = rendered
+            self._evict_cache()
         self._last_error = None
         self._rendered = rendered
         self._qimage = to_qimage(rendered)
@@ -379,7 +458,7 @@ class ImageViewerWidget(QWidget):
         )
 
     def _paint_overlay(self, painter: QPainter) -> None:
-        """Draw window, slice and zoom information in the corner."""
+        """Draw window, slice, zoom and statistics information in the corner."""
         painter.save()
         painter.setPen(Qt.GlobalColor.gray)
         info: list[str] = []
@@ -393,7 +472,37 @@ class ImageViewerWidget(QWidget):
             info.append(f"{self._viewport.slice_index + 1} / {len(self._images)}")
         info.append(f"{self._effective_scale() * 100.0:.0f}%")
         painter.drawText(QPointF(12.0, self.height() - 12.0), "   ".join(info))
+
+        stats = self.statistics
+        if stats is not None:
+            text = (
+                f"min {stats.minimum:.0f}  max {stats.maximum:.0f}  "
+                f"mean {stats.mean:.1f}  SD {stats.standard_deviation:.1f}"
+            )
+            painter.drawText(QPointF(12.0, self.height() - 30.0), text)
+            self._paint_histogram(painter, QPointF(12.0, self.height() - 56.0))
         painter.restore()
+
+    def _paint_histogram(self, painter: QPainter, origin: QPointF) -> None:
+        """Draw a small bar histogram for the current slice."""
+        histogram = self.histogram
+        if histogram is None or histogram.bin_count <= 0:
+            return
+        maximum = max(histogram.counts) if histogram.counts else 0
+        if maximum <= 0:
+            return
+        bar_width = _HISTOGRAM_WIDTH / histogram.bin_count
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(Qt.GlobalColor.gray)
+        for index, count in enumerate(histogram.counts):
+            height = _HISTOGRAM_HEIGHT * count / maximum
+            bar = QRectF(
+                origin.x() + index * bar_width,
+                origin.y() + (_HISTOGRAM_HEIGHT - height),
+                bar_width + 0.5,
+                height,
+            )
+            painter.drawRect(bar)
 
     def _paint_message(self, painter: QPainter, message: str) -> None:
         """Draw a centered diagnostic message."""

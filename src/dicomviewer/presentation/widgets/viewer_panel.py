@@ -7,7 +7,9 @@ from collections.abc import Sequence
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QStackedWidget, QVBoxLayout, QWidget
 
+from dicomviewer.application.processing import Histogram, ImageAnalyzer, PixelStatistics
 from dicomviewer.application.viewing import PixelDecoder, ViewRenderer
+from dicomviewer.domain.image_processing import WindowPreset
 from dicomviewer.domain.studies import Image
 from dicomviewer.presentation.theme.icon_provider import IconProvider
 from dicomviewer.presentation.widgets.empty_state import EmptyState
@@ -32,11 +34,12 @@ class ViewerPanel(QWidget):
         *,
         decoder: PixelDecoder,
         renderer: ViewRenderer,
+        analyzer: ImageAnalyzer,
     ) -> None:
         """Build the viewer area with the given rendering services."""
         super().__init__(parent)
         self.setObjectName("viewerPanel")
-        self._viewer = ImageViewerWidget(self, decoder, renderer)
+        self._viewer = ImageViewerWidget(self, decoder, renderer, analyzer=analyzer)
         self._viewer.content_changed.connect(self.content_changed)
         self._viewer.slice_changed.connect(self.slice_changed)
         self._viewer.zoom_changed.connect(self.zoom_changed)
@@ -97,6 +100,24 @@ class ViewerPanel(QWidget):
     def reset_window_level(self) -> None:
         """Reset the window/level to automatic."""
         self._viewer.reset_window_level()
+
+    def set_window(self, center: float, width: float) -> None:
+        """Apply an explicit window (center, width)."""
+        self._viewer.set_window(center, width)
+
+    def apply_preset(self, preset: WindowPreset) -> None:
+        """Apply a named clinical window preset."""
+        self._viewer.apply_preset(preset)
+
+    @property
+    def statistics(self) -> PixelStatistics | None:
+        """Return the statistics of the displayed slice, if known."""
+        return self._viewer.statistics
+
+    @property
+    def histogram(self) -> Histogram | None:
+        """Return the histogram of the displayed slice, if known."""
+        return self._viewer.histogram
 
     def next_slice(self) -> None:
         """Advance to the next slice."""

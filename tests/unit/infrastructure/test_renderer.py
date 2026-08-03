@@ -5,9 +5,19 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from dicomviewer.application.processing import ProcessingPipeline
 from dicomviewer.application.viewing import PixelArray, RenderingError
 from dicomviewer.domain.viewport import Viewport
 from dicomviewer.infrastructure.rendering.renderer import NumpyViewRenderer
+
+
+class _InvertStage:
+    """Inverts a normalized frame to verify pipeline injection."""
+
+    name = "invert"
+
+    def apply(self, frame: np.ndarray) -> np.ndarray:
+        return 1.0 - frame
 
 
 def _grayscale() -> PixelArray:
@@ -111,3 +121,23 @@ def test_render_wraps_failures_in_rendering_error() -> None:
     renderer = NumpyViewRenderer()
     with pytest.raises(RenderingError):
         renderer.render(Exploding(), Viewport.initial())  # type: ignore[arg-type]
+
+
+def test_render_applies_the_injected_processing_stage() -> None:
+    renderer = NumpyViewRenderer(processing_pipeline=ProcessingPipeline((_InvertStage(),)))
+    plain = NumpyViewRenderer().render(_grayscale(), Viewport.initial())
+    processed = renderer.render(_grayscale(), Viewport.initial())
+    assert plain.data != processed.data
+
+
+def test_render_with_an_empty_pipeline_is_unchanged() -> None:
+    renderer = NumpyViewRenderer(processing_pipeline=ProcessingPipeline(()))
+    plain = NumpyViewRenderer(processing_pipeline=None).render(_grayscale(), Viewport.initial())
+    assert plain.data == renderer.render(_grayscale(), Viewport.initial()).data
+
+
+def test_render_does_not_mutate_the_input_pixels() -> None:
+    pixels = _grayscale()
+    original = pixels.pixels.copy()
+    NumpyViewRenderer().render(pixels, Viewport.initial())
+    np.testing.assert_array_equal(pixels.pixels, original)
