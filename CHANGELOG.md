@@ -5,6 +5,29 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.6.0] - 2026-08-04
+
+### Added
+
+- Metadata Explorer:
+  - Metadata panel now inspects the DICOM metadata of the displayed image
+    and updates automatically when the slice changes.
+  - Grouped presentation: elements are classified into logical groups
+    (Patient, Study, Series, Image, Acquisition, Image Pixel, Equipment,
+    General, File Meta, Other) and ordered in a readable tree.
+  - Live search box that filters elements by keyword, display name, group,
+    tag or value, with an explicit no-matches state.
+  - Bulk Expand all / Collapse all controls.
+  - Context menu actions to copy the DICOM tag (for example `(0010,0010)`)
+    or the element value to the system clipboard.
+  - Bounded per-image metadata cache so browsing a large series reads each
+    header at most once.
+  - Header-only extraction (never loads pixel data) with private and empty
+    elements omitted and binary values size-bounded for readability.
+  - Metadata service wired behind an application port; the metadata panel
+    resets when a new scan starts.
+  - Application version bumped to 0.6.0.
+
 ## [0.5.0] - 2026-08-04
 
 ### Added

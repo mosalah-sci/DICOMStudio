@@ -10,6 +10,7 @@ from pydicom.uid import ExplicitVRLittleEndian
 
 from dicomviewer.application.processing import Histogram, PixelStatistics
 from dicomviewer.application.viewing import PixelArray, RenderedImage
+from dicomviewer.domain.metadata import MetadataDocument, MetadataElement, MetadataGroup
 from dicomviewer.domain.studies import Image, StudyTree
 from dicomviewer.domain.thumbnail import Thumbnail
 from dicomviewer.domain.viewport import Viewport
@@ -140,6 +141,61 @@ class FakeImageAnalyzer:
         return self.histogram_result
 
 
+def sample_metadata_document(
+    *,
+    source: Path = Path("sample.dcm"),
+    patient_name: str = "DOE^JOHN",
+    study_description: str = "Chest exam",
+    modality: str = "CT",
+) -> MetadataDocument:
+    """Return a small grouped metadata document for panel tests."""
+    patient = MetadataGroup(
+        "Patient",
+        (
+            MetadataElement(
+                "(0010,0010)", "PatientName", "Patient", "Patient's Name", patient_name
+            ),
+            MetadataElement("(0010,0020)", "PatientID", "Patient", "Patient ID", "P-1"),
+        ),
+    )
+    study = MetadataGroup(
+        "Study",
+        (
+            MetadataElement(
+                "(0008,1030)",
+                "StudyDescription",
+                "Study",
+                "Study Description",
+                study_description,
+            ),
+        ),
+    )
+    series = MetadataGroup(
+        "Series",
+        (MetadataElement("(0008,0060)", "Modality", "Series", "Modality", modality),),
+    )
+    return MetadataDocument(source=source, groups=(patient, study, series))
+
+
+class FakeMetadataService:
+    """MetadataService double returning a fixed document or raising an error."""
+
+    def __init__(
+        self,
+        document: MetadataDocument | None = None,
+        error: Exception | None = None,
+    ) -> None:
+        self.document = document or sample_metadata_document()
+        self.error = error
+        self.extracted: list[Image] = []
+
+    def extract(self, image: Image) -> MetadataDocument:
+        self.extracted.append(image)
+        if self.error is not None:
+            raise self.error
+        return self.document
+
+
 def sample_pixel_array(width: int = 8, height: int = 6) -> PixelArray:
     """Return a small gradient grayscale frame for viewer tests."""
     grid = (np.arange(height)[:, None] * width + np.arange(width)).astype(np.uint16)
@@ -235,4 +291,66 @@ def write_ct_dataset(
     dataset.HighBit = 15
     dataset.PixelRepresentation = 0
     dataset.PhotometricInterpretation = "MONOCHROME2"
+    dataset.save_as(path, enforce_file_format=True)
+
+
+def write_rich_ct_dataset(
+    path: Path,
+    *,
+    patient_id: str = "P-123",
+    patient_name: str = "DOE^JOHN",
+    patient_birth_date: str = "19800101",
+    patient_sex: str = "M",
+    study_uid: str = "1.2.3.4.5",
+    study_date: str = "20260801",
+    study_description: str = "Chest exam",
+    series_uid: str = "1.2.3.4.5.6",
+    modality: str = "CT",
+    series_number: int = 3,
+    series_description: str = "Chest",
+    sop_uid: str = "1.2.3.4.5.6.7",
+    instance_number: int = 2,
+) -> None:
+    """Write a DICOM file carrying rich metadata across many groups."""
+    file_meta = FileMetaDataset()
+    file_meta.MediaStorageSOPClassUID = CT_SOP_CLASS_UID
+    file_meta.MediaStorageSOPInstanceUID = sop_uid
+    file_meta.TransferSyntaxUID = ExplicitVRLittleEndian
+
+    dataset = Dataset()
+    dataset.file_meta = file_meta
+    dataset.PatientID = patient_id
+    dataset.PatientName = patient_name
+    dataset.PatientBirthDate = patient_birth_date
+    dataset.PatientSex = patient_sex
+    dataset.StudyInstanceUID = study_uid
+    dataset.StudyDate = study_date
+    dataset.StudyDescription = study_description
+    dataset.SeriesInstanceUID = series_uid
+    dataset.SeriesNumber = series_number
+    dataset.SeriesDescription = series_description
+    dataset.Modality = modality
+    dataset.SOPInstanceUID = sop_uid
+    dataset.SOPClassUID = CT_SOP_CLASS_UID
+    dataset.InstanceNumber = instance_number
+    dataset.Manufacturer = "Acme Imaging"
+    dataset.StationName = "CT01"
+    dataset.SoftwareVersions = "1.0.0"
+    dataset.SliceThickness = 1.5
+    dataset.KVP = 120
+    dataset.Rows = 8
+    dataset.Columns = 6
+    dataset.SamplesPerPixel = 1
+    dataset.PhotometricInterpretation = "MONOCHROME2"
+    dataset.PixelSpacing = [0.5, 0.5]
+    dataset.BitsAllocated = 16
+    dataset.BitsStored = 16
+    dataset.HighBit = 15
+    dataset.PixelRepresentation = 0
+    dataset.RescaleIntercept = -1024
+    dataset.RescaleSlope = 1.0
+    dataset.WindowCenter = 40
+    dataset.WindowWidth = 400
+    dataset.add_new((0x0009, 0x0010), "LO", "private-value")
+    dataset.add_new((0x0028, 0x3006), "OW", b"\x00" * 128)
     dataset.save_as(path, enforce_file_format=True)

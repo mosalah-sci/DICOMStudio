@@ -21,6 +21,7 @@ from dicomviewer.application.processing import ProcessingPipeline
 from dicomviewer.application.theme_manager import ThemeManager
 from dicomviewer.domain.settings import SettingsError
 from dicomviewer.infrastructure.configuration.settings_service import build_settings_service
+from dicomviewer.infrastructure.dicom.metadata_reader import PydicomMetadataService
 from dicomviewer.infrastructure.dicom.pixel_reader import PydicomPixelDecoder
 from dicomviewer.infrastructure.dicom.scanner import PydicomStudyScanner
 from dicomviewer.infrastructure.dicom.thumbnail_service import PydicomThumbnailService
@@ -91,6 +92,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         pixel_decoder=PydicomPixelDecoder(),
         view_renderer=NumpyViewRenderer(processing_pipeline=ProcessingPipeline(())),
         image_analyzer=NumpyImageAnalyzer(),
+        metadata_service=PydicomMetadataService(),
     )
     theme_controller.apply_current()
     window.show()

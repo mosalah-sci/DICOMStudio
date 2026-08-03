@@ -10,6 +10,7 @@ from PySide6.QtGui import QAction, QCloseEvent
 from PySide6.QtWidgets import QDockWidget, QFileDialog, QMainWindow, QWidget
 
 from dicomviewer.application.discovery import StudyScanner, ThumbnailService
+from dicomviewer.application.metadata import MetadataService
 from dicomviewer.application.processing import ImageAnalyzer
 from dicomviewer.application.viewing import PixelDecoder, ViewRenderer
 from dicomviewer.application.window_state_store import WindowState, WindowStateStore
@@ -82,6 +83,7 @@ class MainWindow(QMainWindow):
         pixel_decoder: PixelDecoder,
         view_renderer: ViewRenderer,
         image_analyzer: ImageAnalyzer,
+        metadata_service: MetadataService,
         error_presenter: ErrorPresenter | None = None,
         parent: QWidget | None = None,
     ) -> None:
@@ -97,6 +99,7 @@ class MainWindow(QMainWindow):
         self._pixel_decoder = pixel_decoder
         self._view_renderer = view_renderer
         self._image_analyzer = image_analyzer
+        self._metadata_service = metadata_service
         self._scan_thread: QThread | None = None
         self._scan_worker: StudyScanWorker | None = None
         self._scan_relay: _ScanRelay | None = None
@@ -171,6 +174,7 @@ class MainWindow(QMainWindow):
         self._viewer_panel.content_changed.connect(self._sync_viewer_actions)
         self._viewer_panel.zoom_changed.connect(self._on_zoom_changed)
         self._viewer_panel.window_level_changed.connect(self._on_window_level_changed)
+        self._viewer_panel.slice_changed.connect(self._on_slice_changed)
         self.setCentralWidget(self._viewer_panel)
 
         self._study_explorer_panel = StudyExplorerPanel(
@@ -182,11 +186,12 @@ class MainWindow(QMainWindow):
             "Study Explorer",
             self._study_explorer_panel,
         )
-        self._metadata_dock = self._create_dock(
-            "metadataDock",
-            "Metadata",
-            MetadataPanel(self, self._icon_provider),
+        self._metadata_panel = MetadataPanel(
+            self,
+            self._icon_provider,
+            metadata_service=self._metadata_service,
         )
+        self._metadata_dock = self._create_dock("metadataDock", "Metadata", self._metadata_panel)
         self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self._study_explorer_dock)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self._metadata_dock)
 
@@ -246,6 +251,7 @@ class MainWindow(QMainWindow):
         self._scan_generation += 1
         generation = self._scan_generation
         self._study_explorer_panel.show_scanning()
+        self._metadata_panel.show_initial()
         self._status_bar.showMessage(f"Scanning {folder}…")
 
         worker = StudyScanWorker(self._study_scanner, folder)
@@ -317,11 +323,17 @@ class MainWindow(QMainWindow):
         self._scan_thread.wait(3000)
 
     def _on_series_activated(self, series: Series, index: int) -> None:
-        """Display the activated series in the viewer."""
+        """Display the activated series in the viewer and metadata panel."""
         self._viewer_panel.load_series(series.images, index)
+        self._metadata_panel.show_series(series.images, index)
         self._status_bar.showMessage(
             f"Loaded {series.modality or 'series'} with {series.image_count} images."
         )
+
+    def _on_slice_changed(self, index: int, count: int) -> None:
+        """Show the metadata of the newly displayed slice."""
+        del count
+        self._metadata_panel.show_slice(index)
 
     def _apply_window_preset(self, preset: WindowPreset) -> None:
         """Apply a named clinical window preset to the viewer."""

@@ -24,6 +24,7 @@ from dicomviewer.shared.constants import APP_NAME, __version__
 from tests.dicom_utils import (
     FakeErrorPresenter,
     FakeImageAnalyzer,
+    FakeMetadataService,
     FakePixelDecoder,
     FakeStudyScanner,
     FakeThumbnailService,
@@ -63,6 +64,7 @@ def make_window(
         pixel_decoder: FakePixelDecoder | None = None,
         view_renderer: FakeViewRenderer | None = None,
         image_analyzer: FakeImageAnalyzer | None = None,
+        metadata_service: FakeMetadataService | None = None,
     ) -> MainWindow:
         settings_path = tmp_path / "settings.toml"
         settings_service = SettingsService(load_default_settings(), settings_path)
@@ -82,6 +84,7 @@ def make_window(
             pixel_decoder=pixel_decoder or FakePixelDecoder(),
             view_renderer=view_renderer or FakeViewRenderer(),
             image_analyzer=image_analyzer or FakeImageAnalyzer(),
+            metadata_service=metadata_service or FakeMetadataService(),
             error_presenter=FakeErrorPresenter(),
         )
 

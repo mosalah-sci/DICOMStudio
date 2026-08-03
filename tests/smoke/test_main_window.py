@@ -24,7 +24,7 @@ def _sample_tree() -> StudyTree:
 
 def test_main_window_has_expected_title(make_window: Callable[..., MainWindow]) -> None:
     window = make_window()
-    assert window.windowTitle() == "DICOM Viewer Professional - v0.5.0"
+    assert window.windowTitle() == "DICOM Viewer Professional - v0.6.0"
 
 
 def test_main_window_shows_an_empty_state(make_window: Callable[..., MainWindow]) -> None:
@@ -190,3 +190,67 @@ def test_applying_a_window_preset_updates_the_viewer(
     assert window._viewer_panel._viewer.viewport.window_center == -500.0
     assert window._viewer_panel._viewer.viewport.window_width == 1500.0
     assert "CT Lung" in window.statusBar().currentMessage()
+
+
+def test_activating_a_series_populates_the_metadata_panel(
+    make_window: Callable[..., MainWindow],
+    qapp: QApplication,
+    tmp_path: Path,
+) -> None:
+    scanner = FakeStudyScanner(tree=_sample_tree())
+    window = make_window(study_scanner=scanner)
+    folder = tmp_path / "studies"
+    folder.mkdir()
+    window._start_scan(folder)
+    panel = window._study_explorer_panel
+    assert pump_until(qapp, lambda: panel._stack.currentIndex() == 3)
+    series_item = panel._tree.topLevelItem(0).child(0).child(0)
+    panel._tree.itemActivated.emit(series_item, 0)
+    metadata = window._metadata_panel
+    assert metadata._stack.currentIndex() == 1
+    texts = [
+        metadata._tree.topLevelItem(i).text(0) for i in range(metadata._tree.topLevelItemCount())
+    ]
+    assert "Patient" in texts
+    assert "Study" in texts
+    assert "Series" in texts
+
+
+def test_searching_metadata_filters_the_panel(
+    make_window: Callable[..., MainWindow],
+    qapp: QApplication,
+    tmp_path: Path,
+) -> None:
+    scanner = FakeStudyScanner(tree=_sample_tree())
+    window = make_window(study_scanner=scanner)
+    folder = tmp_path / "studies"
+    folder.mkdir()
+    window._start_scan(folder)
+    panel = window._study_explorer_panel
+    assert pump_until(qapp, lambda: panel._stack.currentIndex() == 3)
+    series_item = panel._tree.topLevelItem(0).child(0).child(0)
+    panel._tree.itemActivated.emit(series_item, 0)
+    metadata = window._metadata_panel
+    metadata._search.setText("nonexistent")
+    assert metadata._stack.currentIndex() == 2
+    metadata._search.setText("DOE")
+    assert metadata._stack.currentIndex() == 1
+
+
+def test_starting_a_new_scan_resets_the_metadata_panel(
+    make_window: Callable[..., MainWindow],
+    qapp: QApplication,
+    tmp_path: Path,
+) -> None:
+    scanner = FakeStudyScanner(tree=_sample_tree())
+    window = make_window(study_scanner=scanner)
+    folder = tmp_path / "studies"
+    folder.mkdir()
+    window._start_scan(folder)
+    explorer = window._study_explorer_panel
+    assert pump_until(qapp, lambda: explorer._stack.currentIndex() == 3)
+    series_item = explorer._tree.topLevelItem(0).child(0).child(0)
+    explorer._tree.itemActivated.emit(series_item, 0)
+    assert window._metadata_panel._stack.currentIndex() == 1
+    window._start_scan(folder)
+    assert window._metadata_panel._stack.currentIndex() == 0
