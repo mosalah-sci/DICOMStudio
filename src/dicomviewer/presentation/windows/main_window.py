@@ -1,0 +1,223 @@
+"""Main application window."""
+
+from __future__ import annotations
+
+from loguru import logger
+from PySide6.QtCore import QByteArray, Qt
+from PySide6.QtGui import QAction, QCloseEvent
+from PySide6.QtWidgets import QDockWidget, QMainWindow, QWidget
+
+from dicomviewer.application.window_state_store import WindowState, WindowStateStore
+from dicomviewer.presentation.actions.action_catalog import ActionCatalog
+from dicomviewer.presentation.actions.action_ids import ActionId
+from dicomviewer.presentation.actions.assembly import create_toolbar, populate_menu_bar
+from dicomviewer.presentation.dialogs.about_dialog import AboutDialog
+from dicomviewer.presentation.dialogs.settings_dialog import SettingsDialog
+from dicomviewer.presentation.theme.icon_provider import IconProvider
+from dicomviewer.presentation.theme.theme_controller import ThemeController
+from dicomviewer.presentation.theme.themes import THEMES
+from dicomviewer.presentation.widgets.metadata_panel import MetadataPanel
+from dicomviewer.presentation.widgets.status_bar import StatusBar
+from dicomviewer.presentation.widgets.study_explorer_panel import StudyExplorerPanel
+from dicomviewer.presentation.widgets.viewer_panel import ViewerPanel
+from dicomviewer.shared.constants import SIDEBAR_WIDTHS
+
+_STATE_VERSION = 1
+
+
+class MainWindow(QMainWindow):
+    """Root window hosting the professional application shell.
+
+    Composes the menu bar, toolbar, status bar and the three-panel dock
+    workspace (study explorer, viewer, metadata). Window geometry and dock
+    layout are persisted across sessions.
+    """
+
+    def __init__(
+        self,
+        app_name: str,
+        version: str,
+        theme_controller: ThemeController,
+        window_state_store: WindowStateStore,
+        icon_provider: IconProvider,
+        parent: QWidget | None = None,
+    ) -> None:
+        """Create the window and assemble its complete shell."""
+        super().__init__(parent)
+        self._app_name = app_name
+        self._version = version
+        self._theme_controller = theme_controller
+        self._window_state_store = window_state_store
+        self._icon_provider = icon_provider
+
+        self.setWindowTitle(f"{app_name} - v{version}")
+        self.setMinimumSize(960, 600)
+        self.resize(1280, 800)
+
+        self._catalog = self._build_catalog()
+        self._status_bar = StatusBar(version)
+        self.setStatusBar(self._status_bar)
+        self._build_workspace()
+        populate_menu_bar(self.menuBar(), self._catalog)
+        self.addToolBar(create_toolbar(self, self._catalog))
+
+        self._capture_default_layout()
+        self._restore_persisted_layout()
+        self._sync_dock_toggles()
+        theme_name = self._theme_controller.current_theme
+        self._status_bar.set_theme(THEMES[theme_name].display_name)
+
+    def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802 - Qt virtual override
+        """Persist the window layout before the window closes."""
+        self._save_window_state()
+        super().closeEvent(event)
+
+    def action(self, action_id: ActionId) -> QAction:
+        """Return the action identified by ``action_id``."""
+        return self._catalog.action(action_id)
+
+    def _build_catalog(self) -> ActionCatalog:
+        """Create the action catalog wired to this window's handlers."""
+        return ActionCatalog(
+            self,
+            self._icon_provider,
+            handlers={
+                ActionId.SETTINGS: self._open_settings,
+                ActionId.TOGGLE_STUDY_EXPLORER: self._toggle_study_explorer,
+                ActionId.TOGGLE_METADATA: self._toggle_metadata,
+                ActionId.RESTORE_LAYOUT: self._restore_default_layout,
+                ActionId.FULLSCREEN: self._toggle_fullscreen,
+                ActionId.ABOUT: self._show_about,
+                ActionId.EXIT: self._exit_application,
+            },
+        )
+
+    def _build_workspace(self) -> None:
+        """Create the central viewer and the two dockable side panels."""
+        self._viewer_panel = ViewerPanel(self, self._icon_provider)
+        self.setCentralWidget(self._viewer_panel)
+
+        self._study_explorer_dock = self._create_dock(
+            "studyExplorerDock",
+            "Study Explorer",
+            StudyExplorerPanel(self, self._icon_provider),
+        )
+        self._metadata_dock = self._create_dock(
+            "metadataDock",
+            "Metadata",
+            MetadataPanel(self, self._icon_provider),
+        )
+        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self._study_explorer_dock)
+        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self._metadata_dock)
+
+        self._study_explorer_dock.setMinimumWidth(SIDEBAR_WIDTHS["study_explorer"])
+        self._metadata_dock.setMinimumWidth(SIDEBAR_WIDTHS["metadata"])
+        self.resizeDocks(
+            [self._study_explorer_dock, self._metadata_dock],
+            [SIDEBAR_WIDTHS["study_explorer"], SIDEBAR_WIDTHS["metadata"]],
+            Qt.Orientation.Horizontal,
+        )
+
+    def _create_dock(self, object_name: str, title: str, widget: QWidget) -> QDockWidget:
+        """Create a closable, floatable, movable dock widget."""
+        dock = QDockWidget(title, self)
+        dock.setObjectName(object_name)
+        dock.setWidget(widget)
+        dock.setFeatures(
+            QDockWidget.DockWidgetFeature.DockWidgetClosable
+            | QDockWidget.DockWidgetFeature.DockWidgetMovable
+            | QDockWidget.DockWidgetFeature.DockWidgetFloatable
+        )
+        dock.visibilityChanged.connect(self._on_dock_visibility_changed)
+        return dock
+
+    def _capture_default_layout(self) -> None:
+        """Snapshot the default dock layout for later restoration."""
+        self._default_dock_state = self.saveState(_STATE_VERSION)
+
+    def _restore_persisted_layout(self) -> None:
+        """Apply the saved geometry and dock layout, when one exists."""
+        state = self._window_state_store.load()
+        if state is None:
+            return
+        self.restoreGeometry(QByteArray(state.geometry))
+        self.restoreState(QByteArray(state.dock_state), _STATE_VERSION)
+
+    def _save_window_state(self) -> None:
+        """Serialize geometry and dock layout to the window state store."""
+        state = WindowState(
+            geometry=bytes(self.saveGeometry().data()),
+            dock_state=bytes(self.saveState(_STATE_VERSION).data()),
+        )
+        try:
+            self._window_state_store.save(state)
+        except OSError as exc:
+            logger.error("Could not save window layout: {}", exc)
+
+    def _on_dock_visibility_changed(self, visible: bool) -> None:
+        """Keep the View/Window menu toggles in sync with the docks."""
+        sender = self.sender()
+        if sender is self._study_explorer_dock:
+            self._catalog.action(ActionId.TOGGLE_STUDY_EXPLORER).setChecked(visible)
+        elif sender is self._metadata_dock:
+            self._catalog.action(ActionId.TOGGLE_METADATA).setChecked(visible)
+
+    def _sync_dock_toggles(self) -> None:
+        """Force the dock toggles to match the current dock visibility."""
+        self._catalog.action(ActionId.TOGGLE_STUDY_EXPLORER).setChecked(
+            self._study_explorer_dock.isVisible()
+        )
+        self._catalog.action(ActionId.TOGGLE_METADATA).setChecked(self._metadata_dock.isVisible())
+
+    def _open_settings(self) -> None:
+        """Open the settings dialog with live theme preview."""
+        dialog = SettingsDialog(
+            self,
+            current_theme=self._theme_controller.current_theme,
+            on_theme_changed=self._change_theme,
+        )
+        dialog.exec()
+
+    def _change_theme(self, theme_name: str) -> None:
+        """Switch the theme, refresh icons and update the status bar."""
+        self._theme_controller.switch(theme_name)
+        self._catalog.refresh_icons()
+        self._status_bar.set_theme(THEMES[theme_name].display_name)
+
+    def _show_about(self) -> None:
+        """Open the about dialog."""
+        dialog = AboutDialog(self, self._icon_provider, self._app_name, self._version)
+        dialog.exec()
+
+    def _toggle_study_explorer(self) -> None:
+        """Show or hide the study explorer dock."""
+        checked = self._catalog.action(ActionId.TOGGLE_STUDY_EXPLORER).isChecked()
+        self._study_explorer_dock.setVisible(checked)
+
+    def _toggle_metadata(self) -> None:
+        """Show or hide the metadata dock."""
+        checked = self._catalog.action(ActionId.TOGGLE_METADATA).isChecked()
+        self._metadata_dock.setVisible(checked)
+
+    def _toggle_fullscreen(self) -> None:
+        """Toggle between fullscreen and normal window state."""
+        if self.isFullScreen():
+            self.showNormal()
+        else:
+            self.showFullScreen()
+
+    def _exit_application(self) -> None:
+        """Close the window, quitting the application."""
+        self.close()
+
+    def _restore_default_layout(self) -> None:
+        """Restore the default dock positions and panel widths."""
+        self.restoreState(self._default_dock_state, _STATE_VERSION)
+        self._study_explorer_dock.setVisible(True)
+        self._metadata_dock.setVisible(True)
+        self.resizeDocks(
+            [self._study_explorer_dock, self._metadata_dock],
+            [SIDEBAR_WIDTHS["study_explorer"], SIDEBAR_WIDTHS["metadata"]],
+            Qt.Orientation.Horizontal,
+        )
+        self._sync_dock_toggles()

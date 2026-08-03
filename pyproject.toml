@@ -1,0 +1,81 @@
+[project]
+name = "dicomviewer"
+description = "DICOM Viewer Professional - a professional-grade DICOM medical image viewer for Windows"
+readme = "README.md"
+requires-python = ">=3.13"
+license = { text = "MIT" }
+authors = [{ name = "DICOM Viewer Professional Team" }]
+keywords = ["dicom", "medical-imaging", "viewer", "pyside6"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Win32 (MS Windows)",
+    "Intended Audience :: Healthcare Industry",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.13",
+]
+dynamic = ["version"]
+
+dependencies = [
+    "PySide6>=6.7",
+    "numpy>=2.1",
+    "pydicom>=3.0",
+    "loguru>=0.7.2",
+    "tomlkit>=0.12",
+    "platformdirs>=4.2",
+]
+
+[project.scripts]
+dicomviewer = "dicomviewer.main:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "black>=24.10",
+    "ruff>=0.6",
+    "pyright>=1.1.360",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.version]
+path = "src/dicomviewer/_version.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/dicomviewer"]
+sources = ["src"]
+
+[tool.black]
+line-length = 100
+target-version = ["py313"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "D", "RUF"]
+ignore = ["D104", "D401"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["D"]
+"conftest.py" = ["D"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["dicomviewer"]
+
+[tool.pyright]
+include = ["src"]
+pythonVersion = "3.13"
+typeCheckingMode = "strict"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

@@ -1,0 +1,12 @@
+# Example user settings file.
+
+# Copy the sections you want to override into the user settings file at:
+#   %APPDATA%\DicomViewer\config\settings.toml
+#
+# Values that are absent from the user file are taken from the bundled
+# defaults (src/dicomviewer/infrastructure/configuration/defaults.toml).
+
+[logging]
+level = "INFO"
+rotation = "10 MB"
+retention = "7 days"

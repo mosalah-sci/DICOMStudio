@@ -1,0 +1,299 @@
+/* DICOM Viewer Professional - base stylesheet.
+   Tokens are substituted at runtime from the active theme definition using the
+   @token@ syntax. Keep values in sync with the palette in themes.py. */
+
+QMainWindow, QDialog {
+    background-color: @window@;
+}
+
+QWidget {
+    color: @text@;
+    font-family: "Segoe UI";
+    font-size: 13px;
+}
+
+QMenuBar {
+    background-color: @surface@;
+    border-bottom: 1px solid @border@;
+    padding: 2px 6px;
+}
+QMenuBar::item {
+    background: transparent;
+    padding: 5px 10px;
+    border-radius: 4px;
+}
+QMenuBar::item:selected {
+    background-color: @hover@;
+}
+QMenuBar::item:pressed {
+    background-color: @selection@;
+    color: @on_accent@;
+}
+
+QMenu {
+    background-color: @elevated@;
+    border: 1px solid @border@;
+    border-radius: 6px;
+    padding: 6px;
+}
+QMenu::item {
+    padding: 6px 24px 6px 12px;
+    border-radius: 4px;
+}
+QMenu::item:selected {
+    background-color: @selection@;
+    color: @on_accent@;
+}
+QMenu::item:disabled {
+    color: @disabled@;
+}
+QMenu::separator {
+    height: 1px;
+    background-color: @border@;
+    margin: 6px 8px;
+}
+
+QToolBar {
+    background-color: @surface@;
+    border-bottom: 1px solid @border@;
+    padding: 4px;
+    spacing: 2px;
+}
+QToolBar::separator {
+    width: 1px;
+    background-color: @border@;
+    margin: 4px 8px;
+}
+QToolButton {
+    background: transparent;
+    border: none;
+    border-radius: 4px;
+    padding: 4px;
+}
+QToolButton:hover {
+    background-color: @hover@;
+}
+QToolButton:pressed {
+    background-color: @selection@;
+}
+QToolButton:disabled {
+    color: @disabled@;
+}
+
+QStatusBar {
+    background-color: @surface@;
+    border-top: 1px solid @border@;
+    color: @muted@;
+    font-size: 12px;
+}
+QStatusBar QLabel {
+    color: @muted@;
+    padding: 0 6px;
+}
+QStatusBar::item {
+    border: none;
+}
+
+QDockWidget {
+    color: @text@;
+}
+QDockWidget::title {
+    background-color: @surface@;
+    border-bottom: 1px solid @border@;
+    padding: 7px 8px;
+    font-weight: 600;
+    font-size: 12px;
+}
+QDockWidget > QWidget {
+    background-color: @base@;
+}
+
+QSplitter::handle {
+    background-color: @border@;
+}
+QSplitter::handle:hover {
+    background-color: @accent@;
+}
+QSplitter::handle:horizontal {
+    width: 1px;
+}
+QSplitter::handle:vertical {
+    height: 1px;
+}
+
+QTreeView, QTreeWidget, QListView, QListWidget, QTableView {
+    background-color: @base@;
+    alternate-background-color: @alternate@;
+    border: none;
+    selection-background-color: @selection@;
+    selection-color: @on_accent@;
+    outline: none;
+}
+QTreeView::item, QTreeWidget::item, QListView::item, QListWidget::item {
+    padding: 4px 6px;
+    border-radius: 4px;
+    margin: 1px 4px;
+}
+QTreeView::item:hover, QTreeWidget::item:hover {
+    background-color: @hover@;
+}
+QTreeView::branch {
+    background: transparent;
+}
+
+QHeaderView::section {
+    background-color: @surface@;
+    color: @muted@;
+    border: none;
+    border-bottom: 1px solid @border@;
+    padding: 5px 8px;
+    font-size: 12px;
+}
+
+QTextEdit, QPlainTextEdit, QLineEdit {
+    background-color: @base@;
+    border: 1px solid @border@;
+    border-radius: 4px;
+    padding: 5px 8px;
+    selection-background-color: @selection@;
+    selection-color: @on_accent@;
+}
+QTextEdit:focus, QPlainTextEdit:focus, QLineEdit:focus {
+    border-color: @accent@;
+}
+
+QComboBox {
+    background-color: @base@;
+    border: 1px solid @border@;
+    border-radius: 4px;
+    padding: 5px 8px;
+}
+QComboBox:hover {
+    border-color: @accent@;
+}
+QComboBox QAbstractItemView {
+    background-color: @elevated@;
+    border: 1px solid @border@;
+    border-radius: 4px;
+    selection-background-color: @selection@;
+    selection-color: @on_accent@;
+    outline: none;
+}
+QComboBox::drop-down {
+    border: none;
+    width: 22px;
+}
+
+QPushButton {
+    background-color: @surface@;
+    border: 1px solid @border@;
+    border-radius: 4px;
+    padding: 6px 14px;
+}
+QPushButton:hover {
+    background-color: @hover@;
+    border-color: @accent@;
+}
+QPushButton:pressed {
+    background-color: @selection@;
+    color: @on_accent@;
+}
+QPushButton:default {
+    border-color: @accent@;
+}
+QPushButton:disabled {
+    color: @disabled@;
+}
+
+QCheckBox {
+    spacing: 6px;
+}
+QCheckBox::indicator {
+    width: 16px;
+    height: 16px;
+    border: 1px solid @border@;
+    border-radius: 4px;
+    background-color: @base@;
+}
+QCheckBox::indicator:checked {
+    background-color: @accent@;
+    border-color: @accent@;
+}
+
+QLabel {
+    background: transparent;
+}
+QLabel#emptyStateTitle {
+    color: @text@;
+    font-size: 15px;
+    font-weight: 600;
+}
+QLabel#emptyStateBody {
+    color: @muted@;
+    font-size: 13px;
+}
+
+QWidget#viewerPanel {
+    background-color: @viewer@;
+}
+
+QGroupBox {
+    border: 1px solid @border@;
+    border-radius: 6px;
+    margin-top: 10px;
+    padding-top: 8px;
+}
+QGroupBox::title {
+    subcontrol-origin: margin;
+    left: 8px;
+    padding: 0 4px;
+    color: @muted@;
+    font-weight: 600;
+}
+
+QToolTip {
+    background-color: @tooltip_bg@;
+    color: @tooltip_text@;
+    border: 1px solid @border@;
+    border-radius: 4px;
+    padding: 4px 6px;
+}
+
+QScrollBar:vertical {
+    background: transparent;
+    width: 10px;
+    margin: 0;
+}
+QScrollBar::handle:vertical {
+    background-color: @border@;
+    border-radius: 5px;
+    min-height: 24px;
+    margin: 2px;
+}
+QScrollBar::handle:vertical:hover {
+    background-color: @muted@;
+}
+QScrollBar:horizontal {
+    background: transparent;
+    height: 10px;
+}
+QScrollBar::handle:horizontal {
+    background-color: @border@;
+    border-radius: 5px;
+    min-width: 24px;
+    margin: 2px;
+}
+QScrollBar::handle:horizontal:hover {
+    background-color: @muted@;
+}
+QScrollBar::add-line, QScrollBar::sub-line {
+    width: 0;
+    height: 0;
+}
+QScrollBar::add-page, QScrollBar::sub-page {
+    background: transparent;
+}
+
+QMessageBox {
+    background-color: @window@;
+}
