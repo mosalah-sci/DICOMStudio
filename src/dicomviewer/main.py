@@ -20,6 +20,8 @@ from dicomviewer import __version__
 from dicomviewer.application.theme_manager import ThemeManager
 from dicomviewer.domain.settings import SettingsError
 from dicomviewer.infrastructure.configuration.settings_service import build_settings_service
+from dicomviewer.infrastructure.dicom.scanner import PydicomStudyScanner
+from dicomviewer.infrastructure.dicom.thumbnail_service import PydicomThumbnailService
 from dicomviewer.infrastructure.logging.setup import configure_logging
 from dicomviewer.infrastructure.persistence.app_paths import AppPaths
 from dicomviewer.infrastructure.persistence.window_state_store import JsonWindowStateStore
@@ -74,7 +76,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     icon_provider = IconProvider(_icons_dir())
     theme_controller = ThemeController(theme_manager, ThemeProvider(application), icon_provider)
     window_state_store = JsonWindowStateStore(paths.config_dir / "window_state.json")
-    window = MainWindow(APP_NAME, __version__, theme_controller, window_state_store, icon_provider)
+    window = MainWindow(
+        APP_NAME,
+        __version__,
+        theme_controller,
+        window_state_store,
+        icon_provider,
+        study_scanner=PydicomStudyScanner(),
+        thumbnail_service=PydicomThumbnailService(),
+    )
     theme_controller.apply_current()
     window.show()
 

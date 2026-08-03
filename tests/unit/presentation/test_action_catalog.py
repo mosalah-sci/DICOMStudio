@@ -12,6 +12,7 @@ from dicomviewer.presentation.actions.action_ids import ActionId
 from dicomviewer.presentation.theme.icon_provider import IconProvider
 
 _ENABLED_IDS = (
+    ActionId.OPEN_FOLDER,
     ActionId.SETTINGS,
     ActionId.TOGGLE_STUDY_EXPLORER,
     ActionId.TOGGLE_METADATA,
@@ -46,8 +47,9 @@ def test_catalog_requires_a_handler_for_every_enabled_action(
 
 
 def test_unavailable_actions_exist_but_are_disabled(catalog: ActionCatalog) -> None:
-    assert not catalog.action(ActionId.OPEN_FOLDER).isEnabled()
+    assert not catalog.action(ActionId.OPEN_FILES).isEnabled()
     assert not catalog.action(ActionId.ZOOM_IN).isEnabled()
+    assert catalog.action(ActionId.OPEN_FOLDER).isEnabled()
     assert catalog.action(ActionId.SETTINGS).isEnabled()
 
 

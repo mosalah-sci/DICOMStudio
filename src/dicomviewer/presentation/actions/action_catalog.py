@@ -32,7 +32,6 @@ _SPECS: tuple[ActionSpec, ...] = (
         icon="folder",
         shortcut="Ctrl+O",
         status_tip="Open a folder of DICOM studies",
-        enabled=False,
     ),
     ActionSpec(
         ActionId.OPEN_FILES,

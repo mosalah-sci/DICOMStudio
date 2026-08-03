@@ -5,6 +5,28 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.3.0] - 2026-08-03
+
+### Added
+
+- DICOM Discovery & Loading:
+  - Open Folder action (Ctrl+O) with a native folder picker.
+  - Background study scanning on a worker thread so large folders do not
+    freeze the interface; a newer scan cancels the previous one.
+  - Recursive folder scanning with header-only DICOM parsing for speed.
+  - DICOM validation: malformed, unreadable or unrelated files are ignored
+    gracefully and counted in the status report.
+  - Metadata parsing and grouping into the Patient / Study / Series / Image
+    hierarchy (patient, study and series UIDs with sensible fallbacks).
+  - Study tree in the Study Explorer with modality, image counts, study dates
+    and descriptive tooltips.
+  - Lazy thumbnail generation: thumbnails render in a bounded thread pool when
+    a series is expanded, preserving responsiveness.
+  - Busy, empty and no-results states for the Study Explorer.
+  - Domain study-catalog model and application ports (`StudyScanner`,
+    `ThumbnailService`) backed by pydicom and numpy in Infrastructure.
+  - Application version bumped to 0.3.0.
+
 ## [0.2.0] - 2026-08-03
 
 ### Added

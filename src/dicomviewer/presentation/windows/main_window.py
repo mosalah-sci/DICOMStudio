@@ -2,17 +2,23 @@
 
 from __future__ import annotations
 
-from loguru import logger
-from PySide6.QtCore import QByteArray, Qt
-from PySide6.QtGui import QAction, QCloseEvent
-from PySide6.QtWidgets import QDockWidget, QMainWindow, QWidget
+from functools import partial
+from pathlib import Path
 
+from loguru import logger
+from PySide6.QtCore import QByteArray, Qt, QThread
+from PySide6.QtGui import QAction, QCloseEvent
+from PySide6.QtWidgets import QDockWidget, QFileDialog, QMainWindow, QWidget
+
+from dicomviewer.application.discovery import StudyScanner, ThumbnailService
 from dicomviewer.application.window_state_store import WindowState, WindowStateStore
+from dicomviewer.domain.studies import StudyTree
 from dicomviewer.presentation.actions.action_catalog import ActionCatalog
 from dicomviewer.presentation.actions.action_ids import ActionId
 from dicomviewer.presentation.actions.assembly import create_toolbar, populate_menu_bar
 from dicomviewer.presentation.dialogs.about_dialog import AboutDialog
 from dicomviewer.presentation.dialogs.settings_dialog import SettingsDialog
+from dicomviewer.presentation.feedback.error_presenter import ErrorPresenter
 from dicomviewer.presentation.theme.icon_provider import IconProvider
 from dicomviewer.presentation.theme.theme_controller import ThemeController
 from dicomviewer.presentation.theme.themes import THEMES
@@ -20,6 +26,7 @@ from dicomviewer.presentation.widgets.metadata_panel import MetadataPanel
 from dicomviewer.presentation.widgets.status_bar import StatusBar
 from dicomviewer.presentation.widgets.study_explorer_panel import StudyExplorerPanel
 from dicomviewer.presentation.widgets.viewer_panel import ViewerPanel
+from dicomviewer.presentation.workers.scan_worker import StudyScanWorker
 from dicomviewer.shared.constants import SIDEBAR_WIDTHS
 
 _STATE_VERSION = 1
@@ -40,6 +47,9 @@ class MainWindow(QMainWindow):
         theme_controller: ThemeController,
         window_state_store: WindowStateStore,
         icon_provider: IconProvider,
+        study_scanner: StudyScanner,
+        thumbnail_service: ThumbnailService,
+        error_presenter: ErrorPresenter | None = None,
         parent: QWidget | None = None,
     ) -> None:
         """Create the window and assemble its complete shell."""
@@ -49,6 +59,12 @@ class MainWindow(QMainWindow):
         self._theme_controller = theme_controller
         self._window_state_store = window_state_store
         self._icon_provider = icon_provider
+        self._study_scanner = study_scanner
+        self._thumbnail_service = thumbnail_service
+        self._scan_thread: QThread | None = None
+        self._scan_worker: StudyScanWorker | None = None
+        self._scan_generation = 0
+        self._error_presenter = error_presenter or ErrorPresenter()
 
         self.setWindowTitle(f"{app_name} - v{version}")
         self.setMinimumSize(960, 600)
@@ -68,7 +84,8 @@ class MainWindow(QMainWindow):
         self._status_bar.set_theme(THEMES[theme_name].display_name)
 
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802 - Qt virtual override
-        """Persist the window layout before the window closes."""
+        """Stop any running scan and persist the window layout on close."""
+        self._stop_scan()
         self._save_window_state()
         super().closeEvent(event)
 
@@ -82,6 +99,7 @@ class MainWindow(QMainWindow):
             self,
             self._icon_provider,
             handlers={
+                ActionId.OPEN_FOLDER: self._open_folder,
                 ActionId.SETTINGS: self._open_settings,
                 ActionId.TOGGLE_STUDY_EXPLORER: self._toggle_study_explorer,
                 ActionId.TOGGLE_METADATA: self._toggle_metadata,
@@ -97,10 +115,13 @@ class MainWindow(QMainWindow):
         self._viewer_panel = ViewerPanel(self, self._icon_provider)
         self.setCentralWidget(self._viewer_panel)
 
+        self._study_explorer_panel = StudyExplorerPanel(
+            self, self._icon_provider, thumbnail_service=self._thumbnail_service
+        )
         self._study_explorer_dock = self._create_dock(
             "studyExplorerDock",
             "Study Explorer",
-            StudyExplorerPanel(self, self._icon_provider),
+            self._study_explorer_panel,
         )
         self._metadata_dock = self._create_dock(
             "metadataDock",
@@ -153,6 +174,73 @@ class MainWindow(QMainWindow):
             self._window_state_store.save(state)
         except OSError as exc:
             logger.error("Could not save window layout: {}", exc)
+
+    def _open_folder(self) -> None:
+        """Prompt for a folder and start scanning it for DICOM studies."""
+        folder = QFileDialog.getExistingDirectory(self, "Open DICOM Folder")
+        if not folder:
+            return
+        self._start_scan(Path(folder))
+
+    def _start_scan(self, folder: Path) -> None:
+        """Start a background scan of ``folder``, cancelling any previous one."""
+        self._scan_generation += 1
+        generation = self._scan_generation
+        self._study_explorer_panel.show_scanning()
+        self._status_bar.showMessage(f"Scanning {folder}…")
+
+        worker = StudyScanWorker(self._study_scanner, folder)
+        thread = QThread(self)
+        thread.setObjectName("study-scan")
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.finished.connect(partial(self._on_scan_finished, generation, folder))
+        worker.failed.connect(partial(self._on_scan_failed, generation))
+        worker.finished.connect(worker.deleteLater)
+        worker.failed.connect(worker.deleteLater)
+        worker.finished.connect(thread.quit)
+        worker.failed.connect(thread.quit)
+        thread.finished.connect(thread.deleteLater)
+        self._scan_worker = worker
+        self._scan_thread = thread
+        thread.start()
+
+    def _on_scan_finished(self, generation: int, folder: Path, tree: StudyTree) -> None:
+        """Populate the study explorer and report the scan outcome."""
+        if generation != self._scan_generation:
+            return
+        self._study_explorer_panel.set_study_tree(tree)
+        if not tree.has_content():
+            self._status_bar.showMessage("No DICOM studies found.")
+            return
+        message = (
+            f"Loaded {tree.patient_count} patients, {tree.study_count} studies, "
+            f"{tree.series_count} series."
+        )
+        if tree.invalid_files:
+            message += f" {tree.invalid_files} invalid files ignored."
+        self._status_bar.showMessage(message)
+
+    def _on_scan_failed(self, generation: int, message: str) -> None:
+        """Report a failed scan without interrupting the session."""
+        if generation != self._scan_generation:
+            return
+        self._status_bar.showMessage("Scan failed.")
+        self._study_explorer_panel.show_initial()
+        self._error_presenter.show_error(
+            self,
+            "Scan Failed",
+            "The selected folder could not be scanned.",
+            detail=message,
+        )
+
+    def _stop_scan(self) -> None:
+        """Abort a running scan and wait for its thread to finish."""
+        if self._scan_thread is None or not self._scan_thread.isRunning():
+            return
+        self._scan_generation += 1
+        self._scan_thread.requestInterruption()
+        self._scan_thread.wait(3000)
 
     def _on_dock_visibility_changed(self, visible: bool) -> None:
         """Keep the View/Window menu toggles in sync with the docks."""

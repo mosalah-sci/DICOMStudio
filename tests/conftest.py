@@ -21,6 +21,7 @@ from dicomviewer.presentation.theme.theme_controller import ThemeController
 from dicomviewer.presentation.theme.theme_provider import ThemeProvider
 from dicomviewer.presentation.windows.main_window import MainWindow
 from dicomviewer.shared.constants import APP_NAME, __version__
+from tests.dicom_utils import FakeErrorPresenter, FakeStudyScanner, FakeThumbnailService
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -47,7 +48,12 @@ def make_window(
 ) -> Callable[..., MainWindow]:
     """Return a factory that builds a fully wired MainWindow in a temp dir."""
 
-    def _make(theme: str = "dark", version: str = __version__) -> MainWindow:
+    def _make(
+        theme: str = "dark",
+        version: str = __version__,
+        study_scanner: FakeStudyScanner | None = None,
+        thumbnail_service: FakeThumbnailService | None = None,
+    ) -> MainWindow:
         settings_path = tmp_path / "settings.toml"
         settings_service = SettingsService(load_default_settings(), settings_path)
         theme_manager = ThemeManager(settings_service, load_default_settings())
@@ -55,6 +61,15 @@ def make_window(
             theme_manager.apply_override(theme)
         theme_controller = ThemeController(theme_manager, ThemeProvider(qapp), icon_provider)
         window_state_store = JsonWindowStateStore(tmp_path / "window_state.json")
-        return MainWindow(APP_NAME, version, theme_controller, window_state_store, icon_provider)
+        return MainWindow(
+            APP_NAME,
+            version,
+            theme_controller,
+            window_state_store,
+            icon_provider,
+            study_scanner=study_scanner or FakeStudyScanner(),
+            thumbnail_service=thumbnail_service or FakeThumbnailService(),
+            error_presenter=FakeErrorPresenter(),
+        )
 
     return _make
