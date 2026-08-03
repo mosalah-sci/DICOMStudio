@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import cast
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QIcon, QImage, QPixmap
 from PySide6.QtWidgets import (
     QHeaderView,
@@ -43,6 +43,8 @@ class StudyExplorerPanel(QWidget):
     generated in the background when a series is expanded.
     """
 
+    series_activated = Signal(object, int)  # Series, requested slice index
+
     def __init__(
         self,
         parent: QWidget,
@@ -59,6 +61,7 @@ class StudyExplorerPanel(QWidget):
 
         self._image_items: dict[Path, QTreeWidgetItem] = {}
         self._series_images: dict[str, tuple[Image, ...]] = {}
+        self._series_by_uid: dict[str, Series] = {}
         self._requested_series: set[str] = set()
         self._thumbnail_cache: dict[Path, Thumbnail] = {}
 
@@ -70,6 +73,7 @@ class StudyExplorerPanel(QWidget):
         self._tree.header().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self._tree.header().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         self._tree.itemExpanded.connect(self._on_item_expanded)
+        self._tree.itemActivated.connect(self._on_item_activated)
 
         self._stack = QStackedWidget(self)
         self._stack.addWidget(
@@ -134,6 +138,7 @@ class StudyExplorerPanel(QWidget):
         self._tree.clear()
         self._image_items.clear()
         self._series_images.clear()
+        self._series_by_uid.clear()
         self._requested_series.clear()
         self._thumbnail_cache.clear()
 
@@ -171,16 +176,39 @@ class StudyExplorerPanel(QWidget):
         item.setData(0, _KIND_ROLE, ("series", series.series_instance_uid))
         item.setToolTip(0, _series_tooltip(series))
         self._series_images[series.series_instance_uid] = series.images
+        self._series_by_uid[series.series_instance_uid] = series
         for image in series.images:
-            self._add_image(item, image)
+            self._add_image(item, image, series.series_instance_uid)
 
-    def _add_image(self, parent: QTreeWidgetItem, image: Image) -> None:
+    def _add_image(self, parent: QTreeWidgetItem, image: Image, series_uid: str) -> None:
         """Add an image leaf node to the tree."""
         item = QTreeWidgetItem(parent)
         item.setIcon(0, self._icon_provider.icon("image"))
         item.setText(0, f"Image {image.instance_number}")
         item.setToolTip(0, str(image.path))
+        item.setData(0, _KIND_ROLE, ("image", series_uid))
+        item.setData(1, _KIND_ROLE, str(image.path))
         self._image_items[image.path] = item
+
+    def _on_item_activated(self, item: QTreeWidgetItem, column: int) -> None:
+        """Open the activated series in the viewer."""
+        del column
+        kind_data = item.data(0, _KIND_ROLE)
+        if not isinstance(kind_data, tuple):
+            return
+        kind, series_uid = cast(tuple[str, str], kind_data)
+        series = self._series_by_uid.get(series_uid)
+        if series is None or not series.images:
+            return
+        if kind == "image":
+            path = Path(str(item.data(1, _KIND_ROLE)))
+            index = next(
+                (i for i, image in enumerate(series.images) if image.path == path),
+                0,
+            )
+        else:
+            index = 0
+        self.series_activated.emit(series, index)
 
     def _on_item_expanded(self, item: QTreeWidgetItem) -> None:
         """Start background thumbnail generation for an expanded series."""

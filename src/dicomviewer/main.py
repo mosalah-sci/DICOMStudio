@@ -20,11 +20,13 @@ from dicomviewer import __version__
 from dicomviewer.application.theme_manager import ThemeManager
 from dicomviewer.domain.settings import SettingsError
 from dicomviewer.infrastructure.configuration.settings_service import build_settings_service
+from dicomviewer.infrastructure.dicom.pixel_reader import PydicomPixelDecoder
 from dicomviewer.infrastructure.dicom.scanner import PydicomStudyScanner
 from dicomviewer.infrastructure.dicom.thumbnail_service import PydicomThumbnailService
 from dicomviewer.infrastructure.logging.setup import configure_logging
 from dicomviewer.infrastructure.persistence.app_paths import AppPaths
 from dicomviewer.infrastructure.persistence.window_state_store import JsonWindowStateStore
+from dicomviewer.infrastructure.rendering.renderer import NumpyViewRenderer
 from dicomviewer.presentation.theme.icon_provider import IconProvider
 from dicomviewer.presentation.theme.theme_controller import ThemeController
 from dicomviewer.presentation.theme.theme_provider import ThemeProvider
@@ -84,6 +86,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         icon_provider,
         study_scanner=PydicomStudyScanner(),
         thumbnail_service=PydicomThumbnailService(),
+        pixel_decoder=PydicomPixelDecoder(),
+        view_renderer=NumpyViewRenderer(),
     )
     theme_controller.apply_current()
     window.show()

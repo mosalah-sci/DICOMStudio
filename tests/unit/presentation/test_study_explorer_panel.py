@@ -128,3 +128,29 @@ def test_new_tree_cancels_pending_thumbnails(qapp, icon_provider) -> None:
     before = loader.cancelled
     panel.set_study_tree(StudyTree.empty(Path(".")))
     assert loader.cancelled > before
+
+
+def test_activating_a_series_emits_it_with_zero_index(qapp, icon_provider) -> None:
+    panel, _ = _panel(icon_provider)
+    panel.set_study_tree(_sample_tree())
+    activated: list = []
+    panel.series_activated.connect(lambda series, index: activated.append((series, index)))
+    series_item = panel._tree.topLevelItem(0).child(0).child(0)
+    panel._tree.itemActivated.emit(series_item, 0)
+    assert len(activated) == 1
+    series, index = activated[0]
+    assert series.series_instance_uid == "s-ct"
+    assert index == 0
+
+
+def test_activating_an_image_emits_its_index(qapp, icon_provider) -> None:
+    panel, _ = _panel(icon_provider)
+    panel.set_study_tree(_sample_tree())
+    activated: list = []
+    panel.series_activated.connect(lambda series, index: activated.append((series, index)))
+    image_item = panel._tree.topLevelItem(0).child(0).child(0).child(1)
+    panel._tree.itemActivated.emit(image_item, 0)
+    assert len(activated) == 1
+    series, index = activated[0]
+    assert series.series_instance_uid == "s-ct"
+    assert index == 1

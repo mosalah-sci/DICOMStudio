@@ -20,6 +20,11 @@ _ENABLED_IDS = (
     ActionId.FULLSCREEN,
     ActionId.ABOUT,
     ActionId.EXIT,
+    ActionId.FIT_TO_WINDOW,
+    ActionId.ZOOM_IN,
+    ActionId.ZOOM_OUT,
+    ActionId.RESET_VIEW,
+    ActionId.WINDOW_LEVEL,
 )
 
 
@@ -48,7 +53,8 @@ def test_catalog_requires_a_handler_for_every_enabled_action(
 
 def test_unavailable_actions_exist_but_are_disabled(catalog: ActionCatalog) -> None:
     assert not catalog.action(ActionId.OPEN_FILES).isEnabled()
-    assert not catalog.action(ActionId.ZOOM_IN).isEnabled()
+    assert not catalog.action(ActionId.MEASURE).isEnabled()
+    assert catalog.action(ActionId.ZOOM_IN).isEnabled()
     assert catalog.action(ActionId.OPEN_FOLDER).isEnabled()
     assert catalog.action(ActionId.SETTINGS).isEnabled()
 

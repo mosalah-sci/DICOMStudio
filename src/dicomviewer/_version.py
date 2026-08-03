@@ -4,4 +4,4 @@ Hatchling reads this file for packaging (see ``[tool.hatch.version]`` in
 ``pyproject.toml``), keeping the packaged and runtime versions identical.
 """
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"

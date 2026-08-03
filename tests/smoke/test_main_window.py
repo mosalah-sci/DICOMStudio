@@ -24,7 +24,7 @@ def _sample_tree() -> StudyTree:
 
 def test_main_window_has_expected_title(make_window: Callable[..., MainWindow]) -> None:
     window = make_window()
-    assert window.windowTitle() == "DICOM Viewer Professional - v0.3.0"
+    assert window.windowTitle() == "DICOM Viewer Professional - v0.4.0"
 
 
 def test_main_window_shows_an_empty_state(make_window: Callable[..., MainWindow]) -> None:
@@ -58,9 +58,10 @@ def test_dock_toggle_action_shows_and_hides_the_panel(
 def test_unavailable_actions_are_disabled(make_window: Callable[..., MainWindow]) -> None:
     window = make_window()
     assert not window.action(ActionId.OPEN_FILES).isEnabled()
-    assert not window.action(ActionId.ZOOM_IN).isEnabled()
+    assert not window.action(ActionId.MEASURE).isEnabled()
     assert window.action(ActionId.OPEN_FOLDER).isEnabled()
     assert window.action(ActionId.SETTINGS).isEnabled()
+    assert not window.action(ActionId.ZOOM_IN).isEnabled()
 
 
 def test_closing_the_window_persists_the_layout(
@@ -95,7 +96,9 @@ def test_start_scan_populates_explorer_and_status(
     assert pump_until(qapp, lambda: panel._stack.currentIndex() == 3)
     assert scanner.calls == [folder]
     assert "1 patients, 1 studies, 1 series" in window.statusBar().currentMessage()
-    assert pump_until(qapp, lambda: not window._scan_thread.isRunning())
+    assert pump_until(
+        qapp, lambda: (window._scan_thread is None or not window._scan_thread.isRunning())
+    )
 
 
 def test_failed_scan_reverts_and_reports(
@@ -110,7 +113,9 @@ def test_failed_scan_reverts_and_reports(
     assert pump_until(qapp, lambda: panel._stack.currentIndex() == 0)
     assert "Scan failed" in window.statusBar().currentMessage()
     assert window._error_presenter.errors
-    assert pump_until(qapp, lambda: not window._scan_thread.isRunning())
+    assert pump_until(
+        qapp, lambda: (window._scan_thread is None or not window._scan_thread.isRunning())
+    )
 
 
 def test_empty_scan_reports_no_studies(
@@ -124,4 +129,34 @@ def test_empty_scan_reports_no_studies(
     panel = window._study_explorer_panel
     assert pump_until(qapp, lambda: panel._stack.currentIndex() == 2)
     assert "No DICOM studies found" in window.statusBar().currentMessage()
-    assert pump_until(qapp, lambda: not window._scan_thread.isRunning())
+    assert pump_until(
+        qapp, lambda: (window._scan_thread is None or not window._scan_thread.isRunning())
+    )
+
+
+def test_activating_a_series_loads_the_viewer(
+    make_window: Callable[..., MainWindow],
+    qapp: QApplication,
+    tmp_path: Path,
+) -> None:
+    scanner = FakeStudyScanner(tree=_sample_tree())
+    window = make_window(study_scanner=scanner)
+    folder = tmp_path / "studies"
+    folder.mkdir()
+    window._start_scan(folder)
+    panel = window._study_explorer_panel
+    assert pump_until(qapp, lambda: panel._stack.currentIndex() == 3)
+    series_item = panel._tree.topLevelItem(0).child(0).child(0)
+    panel._tree.itemActivated.emit(series_item, 0)
+    assert window._viewer_panel.has_image
+    assert window._viewer_panel.current_slice == 0
+    assert window.action(ActionId.ZOOM_IN).isEnabled()
+    assert window.action(ActionId.FIT_TO_WINDOW).isEnabled()
+
+
+def test_viewer_actions_are_disabled_without_content(
+    make_window: Callable[..., MainWindow],
+) -> None:
+    window = make_window()
+    assert not window.action(ActionId.ZOOM_IN).isEnabled()
+    assert not window.action(ActionId.RESET_VIEW).isEnabled()

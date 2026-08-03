@@ -2,17 +2,17 @@
 
 from __future__ import annotations
 
-from functools import partial
 from pathlib import Path
 
 from loguru import logger
-from PySide6.QtCore import QByteArray, Qt, QThread
+from PySide6.QtCore import QByteArray, QObject, Qt, QThread, Signal, Slot
 from PySide6.QtGui import QAction, QCloseEvent
 from PySide6.QtWidgets import QDockWidget, QFileDialog, QMainWindow, QWidget
 
 from dicomviewer.application.discovery import StudyScanner, ThumbnailService
+from dicomviewer.application.viewing import PixelDecoder, ViewRenderer
 from dicomviewer.application.window_state_store import WindowState, WindowStateStore
-from dicomviewer.domain.studies import StudyTree
+from dicomviewer.domain.studies import Series, StudyTree
 from dicomviewer.presentation.actions.action_catalog import ActionCatalog
 from dicomviewer.presentation.actions.action_ids import ActionId
 from dicomviewer.presentation.actions.assembly import create_toolbar, populate_menu_bar
@@ -32,6 +32,34 @@ from dicomviewer.shared.constants import SIDEBAR_WIDTHS
 _STATE_VERSION = 1
 
 
+class _ScanRelay(QObject):
+    """Forward worker results to the main thread with scan metadata.
+
+    The worker emits from its own thread, so its signals must not deliver
+    GUI-affecting work directly. This relay lives in the main thread, carries
+    the generation/folder of one scan, and re-emits with those values.
+    """
+
+    finished = Signal(int, Path, object)  # generation, folder, StudyTree
+    failed = Signal(int, str)
+
+    def __init__(self, generation: int, folder: Path, parent: QObject | None = None) -> None:
+        """Create a relay for one scan run."""
+        super().__init__(parent)
+        self._generation = generation
+        self._folder = folder
+
+    @Slot(object)
+    def on_finished(self, tree: StudyTree) -> None:
+        """Forward a completed scan to the main thread."""
+        self.finished.emit(self._generation, self._folder, tree)
+
+    @Slot(str)
+    def on_failed(self, message: str) -> None:
+        """Forward a failed scan to the main thread."""
+        self.failed.emit(self._generation, message)
+
+
 class MainWindow(QMainWindow):
     """Root window hosting the professional application shell.
 
@@ -49,6 +77,8 @@ class MainWindow(QMainWindow):
         icon_provider: IconProvider,
         study_scanner: StudyScanner,
         thumbnail_service: ThumbnailService,
+        pixel_decoder: PixelDecoder,
+        view_renderer: ViewRenderer,
         error_presenter: ErrorPresenter | None = None,
         parent: QWidget | None = None,
     ) -> None:
@@ -61,8 +91,11 @@ class MainWindow(QMainWindow):
         self._icon_provider = icon_provider
         self._study_scanner = study_scanner
         self._thumbnail_service = thumbnail_service
+        self._pixel_decoder = pixel_decoder
+        self._view_renderer = view_renderer
         self._scan_thread: QThread | None = None
         self._scan_worker: StudyScanWorker | None = None
+        self._scan_relay: _ScanRelay | None = None
         self._scan_generation = 0
         self._error_presenter = error_presenter or ErrorPresenter()
 
@@ -70,16 +103,17 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(960, 600)
         self.resize(1280, 800)
 
+        self._build_workspace()
         self._catalog = self._build_catalog()
         self._status_bar = StatusBar(version)
         self.setStatusBar(self._status_bar)
-        self._build_workspace()
         populate_menu_bar(self.menuBar(), self._catalog)
         self.addToolBar(create_toolbar(self, self._catalog))
 
         self._capture_default_layout()
         self._restore_persisted_layout()
         self._sync_dock_toggles()
+        self._sync_viewer_actions(self._viewer_panel.has_image)
         theme_name = self._theme_controller.current_theme
         self._status_bar.set_theme(THEMES[theme_name].display_name)
 
@@ -107,17 +141,31 @@ class MainWindow(QMainWindow):
                 ActionId.FULLSCREEN: self._toggle_fullscreen,
                 ActionId.ABOUT: self._show_about,
                 ActionId.EXIT: self._exit_application,
+                ActionId.FIT_TO_WINDOW: self._viewer_panel.fit_to_window,
+                ActionId.ZOOM_IN: self._viewer_panel.zoom_in,
+                ActionId.ZOOM_OUT: self._viewer_panel.zoom_out,
+                ActionId.RESET_VIEW: self._viewer_panel.reset_view,
+                ActionId.WINDOW_LEVEL: self._viewer_panel.reset_window_level,
             },
         )
 
     def _build_workspace(self) -> None:
         """Create the central viewer and the two dockable side panels."""
-        self._viewer_panel = ViewerPanel(self, self._icon_provider)
+        self._viewer_panel = ViewerPanel(
+            self,
+            self._icon_provider,
+            decoder=self._pixel_decoder,
+            renderer=self._view_renderer,
+        )
+        self._viewer_panel.content_changed.connect(self._sync_viewer_actions)
+        self._viewer_panel.zoom_changed.connect(self._on_zoom_changed)
+        self._viewer_panel.window_level_changed.connect(self._on_window_level_changed)
         self.setCentralWidget(self._viewer_panel)
 
         self._study_explorer_panel = StudyExplorerPanel(
             self, self._icon_provider, thumbnail_service=self._thumbnail_service
         )
+        self._study_explorer_panel.series_activated.connect(self._on_series_activated)
         self._study_explorer_dock = self._create_dock(
             "studyExplorerDock",
             "Study Explorer",
@@ -190,20 +238,35 @@ class MainWindow(QMainWindow):
         self._status_bar.showMessage(f"Scanning {folder}…")
 
         worker = StudyScanWorker(self._study_scanner, folder)
+        relay = _ScanRelay(generation, folder)
         thread = QThread(self)
         thread.setObjectName("study-scan")
         worker.moveToThread(thread)
         thread.started.connect(worker.run)
-        worker.finished.connect(partial(self._on_scan_finished, generation, folder))
-        worker.failed.connect(partial(self._on_scan_failed, generation))
+        worker.finished.connect(relay.on_finished)
+        worker.failed.connect(relay.on_failed)
         worker.finished.connect(worker.deleteLater)
         worker.failed.connect(worker.deleteLater)
         worker.finished.connect(thread.quit)
         worker.failed.connect(thread.quit)
+        relay.finished.connect(self._on_scan_finished)
+        relay.failed.connect(self._on_scan_failed)
         thread.finished.connect(thread.deleteLater)
+        thread.finished.connect(self._on_scan_thread_finished)
         self._scan_worker = worker
         self._scan_thread = thread
+        self._scan_relay = relay
         thread.start()
+
+    def _on_scan_thread_finished(self) -> None:
+        """Release the finished scan thread reference.
+
+        Keeping the object alive in Python after Qt's deferred deletion has
+        run can make garbage collection double-delete it and crash.
+        """
+        thread = self._scan_thread
+        if thread is not None and not thread.isRunning():
+            self._scan_thread = None
 
     def _on_scan_finished(self, generation: int, folder: Path, tree: StudyTree) -> None:
         """Populate the study explorer and report the scan outcome."""
@@ -241,6 +304,35 @@ class MainWindow(QMainWindow):
         self._scan_generation += 1
         self._scan_thread.requestInterruption()
         self._scan_thread.wait(3000)
+
+    def _on_series_activated(self, series: Series, index: int) -> None:
+        """Display the activated series in the viewer."""
+        self._viewer_panel.load_series(series.images, index)
+        self._status_bar.showMessage(
+            f"Loaded {series.modality or 'series'} with {series.image_count} images."
+        )
+
+    def _sync_viewer_actions(self, has_image: bool) -> None:
+        """Enable or disable the view actions based on loaded content."""
+        for action_id in (
+            ActionId.FIT_TO_WINDOW,
+            ActionId.ZOOM_IN,
+            ActionId.ZOOM_OUT,
+            ActionId.RESET_VIEW,
+            ActionId.WINDOW_LEVEL,
+        ):
+            self._catalog.action(action_id).setEnabled(has_image)
+
+    def _on_zoom_changed(self, zoom: float) -> None:
+        """Report the current zoom level in the status bar."""
+        self._status_bar.showMessage(f"Zoom {zoom * 100.0:.0f}%")
+
+    def _on_window_level_changed(self, center: object, width: float) -> None:
+        """Report the current window/level in the status bar."""
+        if width > 0 and isinstance(center, (int, float)):
+            self._status_bar.showMessage(f"Window width {width:.0f} · Level {center:.0f}")
+        else:
+            self._status_bar.showMessage("Window/level: automatic")
 
     def _on_dock_visibility_changed(self, visible: bool) -> None:
         """Keep the View/Window menu toggles in sync with the docks."""

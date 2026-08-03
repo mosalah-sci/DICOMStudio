@@ -5,6 +5,33 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.4.0] - 2026-08-04
+
+### Added
+
+- Medical Image Viewer Core:
+  - Full-resolution DICOM pixel decoding with metadata (rescale, window and
+    photometric interpretation) behind an application port.
+  - Modular numpy rendering pipeline: rescale slope/intercept, VOI LUT /
+    window level, normalization, MONOCHROME1 inversion and RGBA conversion.
+  - High-quality grayscale rendering with smooth, aspect-preserving scaling
+    and an RGBA buffer that is reused across zoom and pan changes.
+  - Color frame support (RGB) with automatic channel normalization; genuinely
+    unsupported pixel formats are reported gracefully instead of crashing.
+  - Window / Level interaction: right-mouse drag adjusts window width and
+    level against a concrete baseline; window/level resets to automatic.
+  - Fit to Window, Actual Size (100%), Zoom In / Out (toolbar, `+`/`-` keys
+    and Ctrl/Shift + mouse wheel).
+  - Pan by left-mouse drag with pixel-accurate image-space offsets.
+  - Slice navigation via mouse wheel and keyboard (arrows, Page Up/Down,
+    Home/End) with clamped bounds and a bounded decode cache.
+  - Double-clicking a series or image in the Study Explorer opens it in the
+    viewer; view actions enable only when content is loaded.
+  - Viewport state model in the Domain layer with zoom, pan, window/level and
+    slice clamping rules that are unit-tested without Qt.
+  - Status bar feedback for zoom and window/level changes.
+  - Application version bumped to 0.4.0.
+
 ## [0.3.0] - 2026-08-03
 
 ### Added

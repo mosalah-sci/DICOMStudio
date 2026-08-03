@@ -21,7 +21,13 @@ from dicomviewer.presentation.theme.theme_controller import ThemeController
 from dicomviewer.presentation.theme.theme_provider import ThemeProvider
 from dicomviewer.presentation.windows.main_window import MainWindow
 from dicomviewer.shared.constants import APP_NAME, __version__
-from tests.dicom_utils import FakeErrorPresenter, FakeStudyScanner, FakeThumbnailService
+from tests.dicom_utils import (
+    FakeErrorPresenter,
+    FakePixelDecoder,
+    FakeStudyScanner,
+    FakeThumbnailService,
+    FakeViewRenderer,
+)
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -53,6 +59,8 @@ def make_window(
         version: str = __version__,
         study_scanner: FakeStudyScanner | None = None,
         thumbnail_service: FakeThumbnailService | None = None,
+        pixel_decoder: FakePixelDecoder | None = None,
+        view_renderer: FakeViewRenderer | None = None,
     ) -> MainWindow:
         settings_path = tmp_path / "settings.toml"
         settings_service = SettingsService(load_default_settings(), settings_path)
@@ -69,6 +77,8 @@ def make_window(
             icon_provider,
             study_scanner=study_scanner or FakeStudyScanner(),
             thumbnail_service=thumbnail_service or FakeThumbnailService(),
+            pixel_decoder=pixel_decoder or FakePixelDecoder(),
+            view_renderer=view_renderer or FakeViewRenderer(),
             error_presenter=FakeErrorPresenter(),
         )
 
