@@ -19,6 +19,7 @@ def populate_menu_bar(
     catalog: ActionCatalog,
     window_presets: Sequence[WindowPreset] = (),
     on_window_preset: Callable[[WindowPreset], None] | None = None,
+    on_clear_measurements: Callable[[], None] | None = None,
 ) -> tuple[QAction, ...]:
     """Populate the standard application menus from the catalog.
 
@@ -45,6 +46,9 @@ def populate_menu_bar(
     _add(tools_menu, catalog, ActionId.WINDOW_LEVEL)
     preset_actions = _add_window_presets(tools_menu, window_presets, on_window_preset)
     _add(tools_menu, catalog, ActionId.MEASURE)
+    if on_clear_measurements is not None:
+        tools_menu.addSeparator()
+        _add(tools_menu, catalog, ActionId.CLEAR_MEASUREMENTS)
     _add(tools_menu, catalog, ActionId.SCREENSHOT)
 
     window_menu = menu_bar.addMenu("&Window")

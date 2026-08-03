@@ -214,6 +214,7 @@ def write_pixel_dataset(
     bits_allocated: int = 16,
     samples: int = 1,
     sop_uid: str = "1.2.3.4.5.6",
+    pixel_spacing: tuple[float, float] | None = None,
 ) -> None:
     """Write a DICOM file carrying a raw pixel array with rendering metadata."""
     file_meta = FileMetaDataset()
@@ -237,6 +238,8 @@ def write_pixel_dataset(
         dataset.WindowCenter = window_center
     if window_width is not None:
         dataset.WindowWidth = window_width
+    if pixel_spacing is not None:
+        dataset.PixelSpacing = list(pixel_spacing)
     dataset.StudyInstanceUID = "1.2.3.4"
     dataset.SeriesInstanceUID = "1.2.3.4.5"
     dataset.SOPInstanceUID = sop_uid

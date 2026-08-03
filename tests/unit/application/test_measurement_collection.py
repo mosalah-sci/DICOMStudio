@@ -1,0 +1,71 @@
+"""Tests for the measurement application state and labels."""
+
+from __future__ import annotations
+
+import numpy as np
+
+from dicomviewer.application.measurement import MeasurementCollection, measurement_label
+from dicomviewer.application.viewing import PixelArray
+from dicomviewer.domain.measurement import Measurement, MeasurementKind, Point
+
+
+def _distance() -> Measurement:
+    return Measurement(MeasurementKind.DISTANCE, (Point(0.0, 0.0), Point(3.0, 4.0)))
+
+
+def test_collection_stores_measurements_per_slice() -> None:
+    collection = MeasurementCollection()
+    measurement = _distance()
+    collection.add(0, measurement)
+    collection.add(2, _distance())
+    assert collection.for_slice(0) == [measurement]
+    assert len(collection.for_slice(2)) == 1
+    assert collection.for_slice(1) == []
+    assert collection.counts() == {0: 1, 2: 1}
+
+
+def test_collection_remove_exact_measurement() -> None:
+    collection = MeasurementCollection()
+    measurement = _distance()
+    collection.add(0, measurement)
+    assert collection.remove(0, measurement) is True
+    assert collection.for_slice(0) == []
+    assert collection.remove(0, measurement) is False
+
+
+def test_collection_clear_slice_and_clear_all() -> None:
+    collection = MeasurementCollection()
+    collection.add(0, _distance())
+    collection.add(1, _distance())
+    collection.clear(0)
+    assert collection.for_slice(0) == []
+    assert collection.has_any()
+    collection.clear_all()
+    assert not collection.has_any()
+    assert collection.counts() == {}
+
+
+def test_distance_label_uses_pixel_spacing_when_available() -> None:
+    collection = MeasurementCollection(
+        pixel_array=PixelArray(
+            pixels=np.zeros((6, 8), dtype=np.uint16),
+            width=8,
+            height=6,
+            pixel_spacing=(0.5, 0.5),
+        )
+    )
+    # 5 pixels along the hypotenuse at 0.5 mm per axis -> 2.5 mm.
+    assert measurement_label(_distance(), collection.pixel_array) == "2.50 mm  (5.00 px)"
+
+
+def test_distance_label_falls_back_to_pixels() -> None:
+    collection = MeasurementCollection()
+    assert measurement_label(_distance(), collection.pixel_array) == "5.00 px"
+
+
+def test_angle_label_reports_degrees() -> None:
+    measurement = Measurement(
+        MeasurementKind.ANGLE,
+        (Point(0.0, 0.0), Point(1.0, 0.0), Point(0.0, 1.0)),
+    )
+    assert measurement_label(measurement, None) == "90.0°"

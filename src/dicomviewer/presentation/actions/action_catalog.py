@@ -86,7 +86,14 @@ _SPECS: tuple[ActionSpec, ...] = (
         ActionId.MEASURE,
         "&Measure",
         icon="ruler",
-        status_tip="Measure distances on the image",
+        status_tip="Measure distances and angles on the image",
+        checkable=True,
+    ),
+    ActionSpec(
+        ActionId.CLEAR_MEASUREMENTS,
+        "&Clear Measurements",
+        icon="eraser",
+        status_tip="Remove all measurements from every slice",
         enabled=False,
     ),
     ActionSpec(
@@ -160,16 +167,21 @@ class ActionCatalog:
         icon_provider: IconProvider,
         handlers: Mapping[ActionId, Callable[[], None]],
     ) -> None:
-        """Build all actions, requiring a handler for every enabled one."""
+        """Build all actions, requiring a handler for every enabled one.
+
+        A handler may also be provided for a disabled action so it can be
+        wired ahead of time and later enabled (for example Clear
+        Measurements).
+        """
         self._icon_provider = icon_provider
         self._icon_names: dict[ActionId, str] = {}
         self._actions: dict[ActionId, QAction] = {}
         for spec in _SPECS:
             action = self._create_action(parent, spec)
-            if spec.enabled:
-                handler = handlers.get(spec.action_id)
-                if handler is None:
-                    raise ValueError(f"No handler registered for enabled action {spec.action_id!r}")
+            handler = handlers.get(spec.action_id)
+            if spec.enabled and handler is None:
+                raise ValueError(f"No handler registered for enabled action {spec.action_id!r}")
+            if handler is not None:
                 action.triggered.connect(handler)
             self._actions[spec.action_id] = action
 

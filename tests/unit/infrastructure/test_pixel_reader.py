@@ -81,3 +81,24 @@ def test_raises_without_pixel_data(tmp_path: Path) -> None:
 def test_raises_for_missing_file(tmp_path: Path) -> None:
     with pytest.raises(UnsupportedPixelFormatError):
         DECODER.decode(Image(tmp_path / "missing.dcm", 1))
+
+
+def test_reads_pixel_spacing_when_present(tmp_path: Path) -> None:
+    path = tmp_path / "spaced.dcm"
+    write_pixel_dataset(path, np.zeros((4, 4), dtype=np.uint16), pixel_spacing=(0.5, 0.7))
+    decoded = DECODER.decode(Image(path, 1))
+    assert decoded.pixel_spacing == (0.5, 0.7)
+
+
+def test_defaults_pixel_spacing_when_absent(tmp_path: Path) -> None:
+    path = tmp_path / "unspaced.dcm"
+    write_pixel_dataset(path, np.zeros((4, 4), dtype=np.uint16))
+    decoded = DECODER.decode(Image(path, 1))
+    assert decoded.pixel_spacing == (1.0, 1.0)
+
+
+def test_defaults_pixel_spacing_when_malformed(tmp_path: Path) -> None:
+    path = tmp_path / "bad-spacing.dcm"
+    write_pixel_dataset(path, np.zeros((4, 4), dtype=np.uint16), pixel_spacing=(0.0, 0.5))
+    decoded = DECODER.decode(Image(path, 1))
+    assert decoded.pixel_spacing == (1.0, 1.0)

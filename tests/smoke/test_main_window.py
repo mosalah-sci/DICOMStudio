@@ -5,9 +5,12 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
+from PySide6.QtCore import QPoint, Qt
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QDockWidget, QLabel, QWidget
 
 from dicomviewer.application.discovery import DiscoveryError
+from dicomviewer.domain.measurement import MeasurementKind
 from dicomviewer.domain.studies import Image, Patient, Series, Study, StudyTree
 from dicomviewer.presentation.actions.action_ids import ActionId
 from dicomviewer.presentation.windows.main_window import MainWindow
@@ -24,7 +27,7 @@ def _sample_tree() -> StudyTree:
 
 def test_main_window_has_expected_title(make_window: Callable[..., MainWindow]) -> None:
     window = make_window()
-    assert window.windowTitle() == "DICOM Viewer Professional - v0.6.0"
+    assert window.windowTitle() == "DICOM Viewer Professional - v0.7.0"
 
 
 def test_main_window_shows_an_empty_state(make_window: Callable[..., MainWindow]) -> None:
@@ -254,3 +257,40 @@ def test_starting_a_new_scan_resets_the_metadata_panel(
     assert window._metadata_panel._stack.currentIndex() == 1
     window._start_scan(folder)
     assert window._metadata_panel._stack.currentIndex() == 0
+
+
+def test_measurement_flow_enables_and_clears(
+    make_window: Callable[..., MainWindow],
+    qapp: QApplication,
+    tmp_path: Path,
+) -> None:
+    scanner = FakeStudyScanner(tree=_sample_tree())
+    window = make_window(study_scanner=scanner)
+    folder = tmp_path / "studies"
+    folder.mkdir()
+    window._start_scan(folder)
+    explorer = window._study_explorer_panel
+    assert pump_until(qapp, lambda: explorer._stack.currentIndex() == 3)
+    series_item = explorer._tree.topLevelItem(0).child(0).child(0)
+    explorer._tree.itemActivated.emit(series_item, 0)
+
+    measure = window.action(ActionId.MEASURE)
+    clear_all = window.action(ActionId.CLEAR_MEASUREMENTS)
+    assert measure.isEnabled()
+    assert not clear_all.isEnabled()
+
+    measure.trigger()
+    assert window._viewer_panel.measure_mode is MeasurementKind.DISTANCE
+    viewer = window._viewer_panel._viewer
+    QTest.mouseClick(viewer, Qt.MouseButton.LeftButton, pos=QPoint(100, 100))
+    QTest.mouseClick(viewer, Qt.MouseButton.LeftButton, pos=QPoint(200, 150))
+    assert window._viewer_panel.measurements.has_any()
+    assert clear_all.isEnabled()
+
+    clear_all.trigger()
+    assert not window._viewer_panel.measurements.has_any()
+    assert not clear_all.isEnabled()
+    assert window._viewer_panel.measure_mode is MeasurementKind.DISTANCE
+
+    measure.trigger()
+    assert window._viewer_panel.measure_mode is None

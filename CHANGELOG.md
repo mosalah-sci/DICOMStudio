@@ -5,6 +5,33 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.7.0] - 2026-08-04
+
+### Added
+
+- Measurement Tools:
+  - Distance measurements: click two points on the image to record the
+    length; the label shows millimetres when DICOM Pixel Spacing is available
+    and falls back to pixels otherwise.
+  - Angle measurements: click three points (vertex and one point on each ray)
+    to record the smaller angle in degrees.
+  - Overlay rendering: completed measurements and the in-progress draft are
+    drawn on the viewer in image pixel coordinates, so they stay synchronized
+    with pan, zoom, fit mode and window/level changes.
+  - Measurement editing: an active draft rubber-bands with the pointer and is
+    cancelled with a right-click; a measurement can be removed from the
+    current slice; Clear Measurements removes every measurement from every
+    slice.
+  - Per-slice measurement storage: measurements are tied to the slice on which
+    they were drawn and survive navigating away and back.
+  - The Tools > Measure action (and toolbar ruler button) toggles the
+    measurement tool; a visible hint appears while measuring and Esc exits.
+  - Pixel Spacing is read from each DICOM header and carried on the decoded
+    pixel array, defaulting to identity spacing when absent or malformed.
+  - Pure domain geometry (distance, angle, pixel-spacing scaling) and an
+    application-level measurement collection keep all math out of the GUI.
+  - Application version bumped to 0.7.0.
+
 ## [0.6.0] - 2026-08-04
 
 ### Added

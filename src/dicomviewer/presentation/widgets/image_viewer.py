@@ -11,9 +11,20 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
-from PySide6.QtGui import QImage, QKeyEvent, QMouseEvent, QPainter, QPaintEvent, QWheelEvent
+from PySide6.QtGui import (
+    QColor,
+    QFontMetricsF,
+    QImage,
+    QKeyEvent,
+    QMouseEvent,
+    QPainter,
+    QPaintEvent,
+    QPen,
+    QWheelEvent,
+)
 from PySide6.QtWidgets import QWidget
 
+from dicomviewer.application.measurement import MeasurementCollection, measurement_label
 from dicomviewer.application.processing import Histogram, ImageAnalyzer, PixelStatistics
 from dicomviewer.application.viewing import (
     PixelArray,
@@ -24,9 +35,11 @@ from dicomviewer.application.viewing import (
     ViewRenderer,
 )
 from dicomviewer.domain.image_processing import WindowPreset
+from dicomviewer.domain.measurement import Measurement, MeasurementKind, Point
 from dicomviewer.domain.studies import Image
 from dicomviewer.domain.viewport import FitMode, Viewport, clamp_slice
 from dicomviewer.presentation.imaging.rendered_image import to_qimage
+from dicomviewer.presentation.widgets.measurement_tool import MeasurementTool
 
 _DRAG_NONE = 0
 _DRAG_PAN = 1
@@ -49,6 +62,8 @@ class ImageViewerWidget(QWidget):
     slice_changed = Signal(int, int)  # current index, total count
     zoom_changed = Signal(float)
     window_level_changed = Signal(object, float)  # center (None = auto), width
+    measurements_changed = Signal(object)  # MeasurementCollection
+    measure_mode_changed = Signal(object)  # MeasurementKind | None
 
     def __init__(
         self,
@@ -77,6 +92,9 @@ class ImageViewerWidget(QWidget):
         self._drag_start = QPointF()
         self._drag_viewport: Viewport | None = None
         self._wl_baseline: tuple[float, float] | None = None
+        self._measurements = MeasurementCollection()
+        self._measure_tool = MeasurementTool(self)
+        self._measure_tool.commit_requested.connect(self._on_measurement_committed)
 
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setMouseTracking(True)
@@ -108,12 +126,15 @@ class ImageViewerWidget(QWidget):
         self._slice_analysis.clear()
         self._frame_cache.clear()
         self._last_error = None
+        self._measurements = MeasurementCollection()
+        self._measure_tool.reset()
         self._viewport = Viewport(
             slice_index=clamp_slice(index, len(self._images)),
             fit_mode=FitMode.FIT,
         )
         self._render_current()
         self.update()
+        self.measurements_changed.emit(self._measurements)
         if self.has_image:
             self.content_changed.emit(True)
             self.slice_changed.emit(self._viewport.slice_index, len(self._images))
@@ -129,8 +150,12 @@ class ImageViewerWidget(QWidget):
         self._rendered = None
         self._qimage = None
         self._last_error = None
+        self._measurements = MeasurementCollection()
+        self._measure_tool.deactivate()
         self._viewport = Viewport.initial()
         self.update()
+        self.measurements_changed.emit(self._measurements)
+        self.measure_mode_changed.emit(None)
         self.content_changed.emit(False)
 
     def set_slice(self, index: int) -> None:
@@ -206,6 +231,68 @@ class ImageViewerWidget(QWidget):
         self.set_window(preset.center, preset.width)
 
     @property
+    def measurements(self) -> MeasurementCollection:
+        """Return the per-slice measurement collection."""
+        return self._measurements
+
+    @property
+    def measure_mode(self) -> MeasurementKind | None:
+        """Return the active measurement kind, or ``None`` when inactive."""
+        return self._measure_tool.kind
+
+    def set_measure_mode(self, kind: MeasurementKind | None) -> None:
+        """Activate or deactivate the measurement tool."""
+        if kind is None:
+            self._measure_tool.deactivate()
+            self.setCursor(Qt.CursorShape.ArrowCursor)
+        else:
+            self._measure_tool.activate(kind)
+            self.setCursor(Qt.CursorShape.CrossCursor)
+        self.measure_mode_changed.emit(kind)
+        self.update()
+
+    def remove_measurement(self, measurement: Measurement) -> None:
+        """Remove one measurement from the current slice."""
+        if self._measurements.remove(self.current_slice, measurement):
+            self.measurements_changed.emit(self._measurements)
+            self.update()
+
+    def clear_measurements(self) -> None:
+        """Remove every measurement from every slice."""
+        self._measurements.clear_all()
+        self._measure_tool.reset()
+        self.measurements_changed.emit(self._measurements)
+        self.update()
+
+    def widget_to_image(self, position: QPointF) -> Point:
+        """Map a widget coordinate into image pixel coordinates."""
+        image = self._qimage
+        if image is None or image.isNull():
+            return Point(position.x(), position.y())
+        rect = self._target_rect(image)
+        if rect.width() <= 0 or rect.height() <= 0:
+            return Point(0.0, 0.0)
+        point = Point(
+            (position.x() - rect.left()) / rect.width() * image.width(),
+            (position.y() - rect.top()) / rect.height() * image.height(),
+        )
+        return Point(
+            min(max(point.x, 0.0), float(image.width())),
+            min(max(point.y, 0.0), float(image.height())),
+        )
+
+    def image_to_widget(self, point: Point) -> QPointF:
+        """Map an image pixel coordinate into widget coordinates."""
+        image = self._qimage
+        if image is None or image.isNull():
+            return QPointF(point.x, point.y)
+        rect = self._target_rect(image)
+        return QPointF(
+            rect.left() + point.x / image.width() * rect.width(),
+            rect.top() + point.y / image.height() * rect.height(),
+        )
+
+    @property
     def statistics(self) -> PixelStatistics | None:
         """Return the statistics of the current slice, or ``None`` if unknown."""
         analysis = self._analysis_for(self._viewport.slice_index)
@@ -218,8 +305,16 @@ class ImageViewerWidget(QWidget):
         return analysis[1] if analysis is not None else None
 
     def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802
-        """Begin a pan or window/level drag."""
+        """Begin a pan/window drag or place a measurement point."""
         self.setFocus()
+        if self._measure_tool.is_active():
+            if event.button() == Qt.MouseButton.LeftButton:
+                self._measure_tool.handle_press(event.position())
+                self.update()
+            elif event.button() == Qt.MouseButton.RightButton:
+                self._measure_tool.cancel_draft()
+                self.update()
+            return
         if event.button() == Qt.MouseButton.LeftButton and self.has_image:
             self._begin_drag(_DRAG_PAN, event.position())
         elif event.button() == Qt.MouseButton.RightButton and self.has_image:
@@ -228,7 +323,11 @@ class ImageViewerWidget(QWidget):
             super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:  # noqa: N802
-        """Update the active pan or window/level drag."""
+        """Update the active drag or rubber-band a measurement draft."""
+        if self._measure_tool.is_active():
+            self._measure_tool.handle_move(event.position())
+            self.update()
+            return
         if self._drag_mode == _DRAG_NONE or self._drag_viewport is None:
             return
         delta = event.position() - self._drag_start
@@ -253,7 +352,9 @@ class ImageViewerWidget(QWidget):
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:  # noqa: N802
         """End the active drag."""
-        self._end_drag()
+        del event
+        if not self._measure_tool.is_active():
+            self._end_drag()
 
     def wheelEvent(self, event: QWheelEvent) -> None:  # noqa: N802
         """Scroll slices, or zoom when a zoom modifier is held."""
@@ -291,6 +392,9 @@ class ImageViewerWidget(QWidget):
             event.accept()
         elif key == Qt.Key.Key_Minus:
             self.zoom_out()
+            event.accept()
+        elif key == Qt.Key.Key_Escape and self._measure_tool.is_active():
+            self.set_measure_mode(None)
             event.accept()
         else:
             super().keyPressEvent(event)
@@ -411,6 +515,7 @@ class ImageViewerWidget(QWidget):
             self._rendered = None
             self._qimage = None
             return
+        self._measurements.pixel_array = pixels
         cache_key = (
             self._viewport.slice_index,
             self._viewport.window_center,
@@ -481,7 +586,78 @@ class ImageViewerWidget(QWidget):
             )
             painter.drawText(QPointF(12.0, self.height() - 30.0), text)
             self._paint_histogram(painter, QPointF(12.0, self.height() - 56.0))
+
+        if self._measure_tool.is_active():
+            painter.setPen(Qt.GlobalColor.yellow)
+            painter.drawText(QPointF(12.0, 24.0), "Measuring - click to place points (Esc to stop)")
+        self._paint_measurements(painter)
         painter.restore()
+
+    def _paint_measurements(self, painter: QPainter) -> None:
+        """Draw completed measurements and the in-progress draft."""
+        measurements = self._measurements.for_slice(self.current_slice)
+        pixel_array = self._measurements.pixel_array
+        for measurement in measurements:
+            self._draw_measurement(painter, measurement, pixel_array)
+        if self._measure_tool.is_active():
+            self._measure_tool.paint(painter)
+
+    def _draw_measurement(
+        self,
+        painter: QPainter,
+        measurement: Measurement,
+        pixel_array: PixelArray | None,
+    ) -> None:
+        """Draw one completed measurement with its handle points and label."""
+        points = [self.image_to_widget(point) for point in measurement.points]
+        painter.save()
+        painter.setPen(QPen(QColor("#22d3ee"), 1.5))
+        painter.setBrush(QColor("#22d3ee"))
+        for point in points:
+            painter.drawEllipse(point, 3.0, 3.0)
+        label = measurement_label(measurement, pixel_array)
+        if measurement.kind is MeasurementKind.DISTANCE:
+            painter.setPen(QPen(QColor("#22d3ee"), 1.5))
+            painter.drawLine(points[0], points[1])
+            self._draw_label(painter, label, self._midpoint(points[0], points[1]))
+        else:
+            painter.drawLine(points[0], points[1])
+            painter.drawLine(points[0], points[2])
+            label_point = QPointF(
+                (points[0].x() + (points[1].x() + points[2].x()) / 2.0) / 2.0,
+                (points[0].y() + (points[1].y() + points[2].y()) / 2.0) / 2.0,
+            )
+            self._draw_label(painter, label, label_point)
+        painter.restore()
+
+    def _draw_label(self, painter: QPainter, text: str, position: QPointF) -> None:
+        """Draw ``text`` on a small dark backdrop centered at ``position``."""
+        font = painter.font()
+        font.setBold(True)
+        painter.setFont(font)
+        metrics = QFontMetricsF(font)
+        box = QRectF(
+            position.x() - metrics.horizontalAdvance(text) / 2.0 - 3.0,
+            position.y() - metrics.height() / 2.0 - 2.0,
+            metrics.horizontalAdvance(text) + 6.0,
+            metrics.height() + 4.0,
+        )
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(0, 0, 0, 150))
+        painter.drawRoundedRect(box, 3.0, 3.0)
+        painter.setPen(QColor("#ffffff"))
+        painter.drawText(box, Qt.AlignmentFlag.AlignCenter, text)
+
+    @staticmethod
+    def _midpoint(a: QPointF, b: QPointF) -> QPointF:
+        """Return the midpoint of two widget points."""
+        return QPointF((a.x() + b.x()) / 2.0, (a.y() + b.y()) / 2.0)
+
+    def _on_measurement_committed(self, measurement: Measurement) -> None:
+        """Store a completed measurement and notify listeners."""
+        self._measurements.add(self.current_slice, measurement)
+        self.measurements_changed.emit(self._measurements)
+        self.update()
 
     def _paint_histogram(self, painter: QPainter, origin: QPointF) -> None:
         """Draw a small bar histogram for the current slice."""

@@ -95,4 +95,28 @@ class PydicomPixelDecoder:
             rescale_intercept=_first_float(getattr(dataset, "RescaleIntercept", None)) or 0.0,
             window_center=_first_float(getattr(dataset, "WindowCenter", None)),
             window_width=_first_float(getattr(dataset, "WindowWidth", None)),
+            pixel_spacing=_read_pixel_spacing(getattr(dataset, "PixelSpacing", None)),
         )
+
+
+def _read_pixel_spacing(value: object | None) -> tuple[float, float]:
+    """Return (row, column) pixel spacing in millimetres, defaulting to 1.0.
+
+    PixelSpacing is a two-element DS: [row spacing, column spacing]. Missing,
+    malformed or non-positive spacing falls back to the identity so physical
+    and pixel measurements coincide.
+    """
+    row = _first_float(value)
+    column = None if value is None else _first_float(_second(value))
+    if row is None or column is None or row <= 0.0 or column <= 0.0:
+        return (1.0, 1.0)
+    return (row, column)
+
+
+def _second(value: object) -> object | None:
+    """Return the second element of a DICOM multi-value or ``None``."""
+    try:
+        array = np.asarray(value)
+    except Exception:
+        return None
+    return None if array.size < 2 else array.flat[1]

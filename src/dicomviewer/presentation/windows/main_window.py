@@ -10,11 +10,13 @@ from PySide6.QtGui import QAction, QCloseEvent
 from PySide6.QtWidgets import QDockWidget, QFileDialog, QMainWindow, QWidget
 
 from dicomviewer.application.discovery import StudyScanner, ThumbnailService
+from dicomviewer.application.measurement import MeasurementCollection
 from dicomviewer.application.metadata import MetadataService
 from dicomviewer.application.processing import ImageAnalyzer
 from dicomviewer.application.viewing import PixelDecoder, ViewRenderer
 from dicomviewer.application.window_state_store import WindowState, WindowStateStore
 from dicomviewer.domain.image_processing import WINDOW_PRESETS, WindowPreset
+from dicomviewer.domain.measurement import MeasurementKind
 from dicomviewer.domain.studies import Series, StudyTree
 from dicomviewer.presentation.actions.action_catalog import ActionCatalog
 from dicomviewer.presentation.actions.action_ids import ActionId
@@ -120,6 +122,7 @@ class MainWindow(QMainWindow):
             self._catalog,
             window_presets=WINDOW_PRESETS,
             on_window_preset=self._apply_window_preset,
+            on_clear_measurements=self._clear_measurements,
         )
         self.addToolBar(create_toolbar(self, self._catalog))
 
@@ -159,6 +162,8 @@ class MainWindow(QMainWindow):
                 ActionId.ZOOM_OUT: self._viewer_panel.zoom_out,
                 ActionId.RESET_VIEW: self._viewer_panel.reset_view,
                 ActionId.WINDOW_LEVEL: self._viewer_panel.reset_window_level,
+                ActionId.MEASURE: self._toggle_measure,
+                ActionId.CLEAR_MEASUREMENTS: self._clear_measurements,
             },
         )
 
@@ -175,6 +180,8 @@ class MainWindow(QMainWindow):
         self._viewer_panel.zoom_changed.connect(self._on_zoom_changed)
         self._viewer_panel.window_level_changed.connect(self._on_window_level_changed)
         self._viewer_panel.slice_changed.connect(self._on_slice_changed)
+        self._viewer_panel.measurements_changed.connect(self._on_measurements_changed)
+        self._viewer_panel.measure_mode_changed.connect(self._sync_measure_action)
         self.setCentralWidget(self._viewer_panel)
 
         self._study_explorer_panel = StudyExplorerPanel(
@@ -348,10 +355,38 @@ class MainWindow(QMainWindow):
             ActionId.ZOOM_OUT,
             ActionId.RESET_VIEW,
             ActionId.WINDOW_LEVEL,
+            ActionId.MEASURE,
         ):
             self._catalog.action(action_id).setEnabled(has_image)
         for action in self._preset_actions:
             action.setEnabled(has_image)
+
+    def _toggle_measure(self) -> None:
+        """Toggle the measurement tool on or off."""
+        action = self._catalog.action(ActionId.MEASURE)
+        if action.isChecked():
+            self._viewer_panel.set_measure_mode(MeasurementKind.DISTANCE)
+        else:
+            self._viewer_panel.set_measure_mode(None)
+
+    def _sync_measure_action(self, kind: object) -> None:
+        """Keep the Measure action checked to match the active tool."""
+        checked = kind is not None
+        action = self._catalog.action(ActionId.MEASURE)
+        if action.isChecked() != checked:
+            action.setChecked(checked)
+
+    def _clear_measurements(self) -> None:
+        """Remove every measurement and report it in the status bar."""
+        self._viewer_panel.clear_measurements()
+        self._status_bar.showMessage("Cleared all measurements.")
+
+    def _on_measurements_changed(self, measurements: MeasurementCollection) -> None:
+        """Enable Clear Measurements only while measurements exist."""
+        has_any = measurements.has_any()
+        self._catalog.action(ActionId.CLEAR_MEASUREMENTS).setEnabled(has_any)
+        if has_any:
+            self._status_bar.showMessage(f"{measurements.counts()} measurements stored.")
 
     def _on_zoom_changed(self, zoom: float) -> None:
         """Report the current zoom level in the status bar."""

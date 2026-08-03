@@ -41,6 +41,7 @@ class PixelArray:
     rescale_intercept: float = 0.0
     window_center: float | None = None
     window_width: float | None = None
+    pixel_spacing: tuple[float, float] = (1.0, 1.0)
 
     @property
     def is_color(self) -> bool:

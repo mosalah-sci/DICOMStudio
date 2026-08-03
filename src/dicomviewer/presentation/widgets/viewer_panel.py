@@ -7,9 +7,11 @@ from collections.abc import Sequence
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QStackedWidget, QVBoxLayout, QWidget
 
+from dicomviewer.application.measurement import MeasurementCollection
 from dicomviewer.application.processing import Histogram, ImageAnalyzer, PixelStatistics
 from dicomviewer.application.viewing import PixelDecoder, ViewRenderer
 from dicomviewer.domain.image_processing import WindowPreset
+from dicomviewer.domain.measurement import Measurement, MeasurementKind
 from dicomviewer.domain.studies import Image
 from dicomviewer.presentation.theme.icon_provider import IconProvider
 from dicomviewer.presentation.widgets.empty_state import EmptyState
@@ -26,6 +28,8 @@ class ViewerPanel(QWidget):
     slice_changed = Signal(int, int)
     zoom_changed = Signal(float)
     window_level_changed = Signal(object, float)
+    measurements_changed = Signal(object)
+    measure_mode_changed = Signal(object)
 
     def __init__(
         self,
@@ -44,6 +48,8 @@ class ViewerPanel(QWidget):
         self._viewer.slice_changed.connect(self.slice_changed)
         self._viewer.zoom_changed.connect(self.zoom_changed)
         self._viewer.window_level_changed.connect(self.window_level_changed)
+        self._viewer.measurements_changed.connect(self.measurements_changed)
+        self._viewer.measure_mode_changed.connect(self.measure_mode_changed)
 
         self._stack = QStackedWidget(self)
         self._stack.addWidget(
@@ -140,3 +146,25 @@ class ViewerPanel(QWidget):
     def slice_count(self) -> int:
         """Return the number of slices in the loaded series."""
         return self._viewer.slice_count
+
+    @property
+    def measurements(self) -> MeasurementCollection:
+        """Return the viewer's measurement collection."""
+        return self._viewer.measurements
+
+    @property
+    def measure_mode(self) -> MeasurementKind | None:
+        """Return the active measurement tool, or ``None``."""
+        return self._viewer.measure_mode
+
+    def set_measure_mode(self, kind: MeasurementKind | None) -> None:
+        """Activate or deactivate the measurement tool."""
+        self._viewer.set_measure_mode(kind)
+
+    def remove_measurement(self, measurement: Measurement) -> None:
+        """Remove a single measurement from the current slice."""
+        self._viewer.remove_measurement(measurement)
+
+    def clear_measurements(self) -> None:
+        """Remove every measurement from every slice."""
+        self._viewer.clear_measurements()
