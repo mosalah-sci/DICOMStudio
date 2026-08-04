@@ -78,8 +78,8 @@ class PixelDecoder(Protocol):
     def decode(self, image: Image) -> PixelArray:
         """Return the decoded pixels and rendering metadata for ``image``.
 
-        Raises :class:`UnsupportedPixelFormat` for files that cannot produce a
-        displayable frame.
+        Raises :class:`UnsupportedPixelFormatError` for files that cannot
+        produce a displayable frame.
         """
         ...
 

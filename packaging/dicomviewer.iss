@@ -4,10 +4,10 @@
 ;   & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" packaging\dicomviewer.iss
 ;
 ; The version may be overridden on the command line:
-;   ISCC.exe /DMyAppVersion=0.11.0 packaging\dicomviewer.iss
+;   ISCC.exe /DMyAppVersion=1.0.0 packaging\dicomviewer.iss
 
 #ifndef MyAppVersion
-  #define MyAppVersion "0.11.0"
+  #define MyAppVersion "1.0.0"
 #endif
 
 #ifndef MyAppName

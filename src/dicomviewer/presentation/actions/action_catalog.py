@@ -77,7 +77,7 @@ _SPECS: tuple[ActionSpec, ...] = (
     ),
     ActionSpec(
         ActionId.WINDOW_LEVEL,
-        "&Window/Level...",
+        "Reset &Window/Level",
         icon="target",
         status_tip="Reset the window/level to automatic (right-drag adjusts it)",
     ),

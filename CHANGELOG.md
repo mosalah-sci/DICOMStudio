@@ -5,6 +5,42 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.0.0] - 2026-08-05
+
+### Added
+
+- Production Readiness:
+  - Project-wide stability review of the presentation, application, domain,
+    shared and infrastructure layers, with every genuine finding fixed and
+    covered by regression tests.
+  - Fit to Window / Actual Size / Reset View now report the true effective
+    zoom level in the status bar instead of always reporting 100%.
+  - Trackpad scrolling support: viewers fall back to pixel deltas when a
+    device reports no angular delta.
+  - Measurement preview points are now tied to the slice on which they were
+    drawn, so a half-placed measurement no longer leaks onto other slices.
+  - The metadata panel tolerates unexpected extraction failures (showing the
+    unavailable state instead of crashing) and preserves the expanded /
+    collapsed state of groups while navigating slices or searching.
+  - Rendered RGBA frames use a small fixed cache cap, decoupled from the
+    user-configured decoded-frame cache, so memory stays bounded even on very
+    large images.
+  - Frame-cache eviction no longer grows unbounded when adjusting window/level
+    repeatedly on a single slice.
+  - Panning and zooming from a fitted view now start from the displayed scale
+    rather than snapping to 100%; zoom-in/zoom-out step correctly from fit.
+  - Edge clicks no longer produce out-of-range measurement coordinates.
+  - Analysis failures and rendering errors can no longer overwrite a valid
+    frame with an error message or leave a stale frame on screen.
+  - The Window/Level action is renamed "Reset Window/Level" to match what it
+    does.
+  - Settings persistence, theme switching and measurement storage are more
+    resilient: save failures never revert in-memory state and measurement
+    collections no longer pin full pixel arrays in memory.
+  - Unknown measurement kinds are rejected with a clear error instead of
+    silently returning wrong values.
+- Application version bumped to 1.0.0.
+
 ## [0.11.0] - 2026-08-04
 
 ### Added

@@ -107,6 +107,7 @@ def test_slice_changed_signal_emits(qapp) -> None:
 
 def test_zoom_in_and_out_change_viewport(qapp) -> None:
     viewer = _viewer()
+    viewer.resize(8, 6)
     viewer.load_series(_series())
     zooms: list[float] = []
     viewer.zoom_changed.connect(zooms.append)
@@ -116,6 +117,15 @@ def test_zoom_in_and_out_change_viewport(qapp) -> None:
     viewer.zoom_out()
     assert viewer.viewport.zoom == 1.0
     assert zooms == [1.25, 1.0]
+
+
+def test_zoom_in_steps_from_the_fit_scale(qapp) -> None:
+    viewer = _viewer()
+    viewer.resize(80, 60)
+    viewer.load_series(_series())
+    viewer.zoom_in()
+    assert viewer.viewport.fit_mode == FitMode.FREE
+    assert viewer.viewport.zoom == 12.5
 
 
 def test_zoom_is_clamped(qapp) -> None:
@@ -161,14 +171,28 @@ def test_reset_window_level_restores_auto(qapp) -> None:
 
 def test_left_drag_pans_the_image(qapp) -> None:
     viewer = _viewer()
-    viewer.resize(400, 300)
+    viewer.resize(80, 60)
     viewer.load_series(_series())
     QTest.mousePress(viewer, Qt.MouseButton.LeftButton, pos=QPoint(10, 10))
     QTest.mouseMove(viewer, QPoint(30, 20))
     QTest.mouseRelease(viewer, Qt.MouseButton.LeftButton, pos=QPoint(30, 20))
     assert viewer.viewport.fit_mode == FitMode.FREE
-    assert viewer.viewport.pan_x == 20.0
-    assert viewer.viewport.pan_y == 10.0
+    # Panning keeps the fit scale, so a 20x10 px drag moves the image by
+    # 20/10 x 10/10 image pixels (scale 10 for an 8x6 image in an 80x60 view).
+    assert viewer.viewport.pan_x == 2.0
+    assert viewer.viewport.pan_y == 1.0
+
+
+def test_pan_from_fit_keeps_the_displayed_scale(qapp) -> None:
+    viewer = _viewer()
+    viewer.resize(80, 60)
+    viewer.load_series(_series())
+    assert viewer.viewport.fit_mode == FitMode.FIT
+    QTest.mousePress(viewer, Qt.MouseButton.LeftButton, pos=QPoint(10, 10))
+    QTest.mouseMove(viewer, QPoint(30, 20))
+    QTest.mouseRelease(viewer, Qt.MouseButton.LeftButton, pos=QPoint(30, 20))
+    assert viewer.viewport.fit_mode == FitMode.FREE
+    assert viewer.viewport.zoom == 10.0
 
 
 def test_right_drag_adjusts_window_level(qapp) -> None:
@@ -197,6 +221,7 @@ def test_wheel_scrolls_slices(qapp) -> None:
 
 def test_control_wheel_zooms(qapp) -> None:
     viewer = _viewer()
+    viewer.resize(8, 6)
     viewer.load_series(_series())
     _wheel(viewer, qapp, 120, Qt.KeyboardModifier.ControlModifier)
     assert viewer.viewport.zoom == 1.25
@@ -217,6 +242,7 @@ def test_arrow_keys_navigate_slices(qapp) -> None:
 
 def test_plus_and_minus_keys_zoom(qapp) -> None:
     viewer = _viewer()
+    viewer.resize(8, 6)
     viewer.load_series(_series())
     QTest.keyClick(viewer, Qt.Key.Key_Plus)
     assert viewer.viewport.zoom == 1.25
@@ -328,6 +354,14 @@ def test_render_cache_is_bounded(qapp) -> None:
     viewer.load_series(_series(count=5))
     for index in range(5):
         viewer.set_slice(index)
+    assert len(viewer._frame_cache) <= 3
+
+
+def test_frame_cache_evicts_old_window_level_entries(qapp) -> None:
+    viewer = _viewer(max_cache=3)
+    viewer.load_series(_series(count=2))
+    for center, width in ((40.0, 400.0), (80.0, 200.0), (120.0, 100.0), (160.0, 50.0)):
+        viewer.set_window(center, width)
     assert len(viewer._frame_cache) <= 3
 
 

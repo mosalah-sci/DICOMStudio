@@ -33,7 +33,12 @@ from dicomviewer.domain.image_processing import (
     find_window_preset,
 )
 from dicomviewer.domain.measurement import MeasurementKind
-from dicomviewer.domain.settings import MeasurementSettings, Settings, ViewingSettings
+from dicomviewer.domain.settings import (
+    MeasurementSettings,
+    Settings,
+    SettingsError,
+    ViewingSettings,
+)
 from dicomviewer.domain.studies import Series, StudyTree
 from dicomviewer.presentation.actions.action_catalog import ActionCatalog
 from dicomviewer.presentation.actions.action_ids import ActionId
@@ -291,7 +296,15 @@ class MainWindow(QMainWindow):
         """Start a background scan of ``folder``, cancelling any previous one."""
         self._scan_generation += 1
         generation = self._scan_generation
-        self._settings_manager.add_recent_folder(folder)
+        try:
+            self._settings_manager.add_recent_folder(folder)
+        except SettingsError as exc:
+            self._error_presenter.show_warning(
+                self,
+                "Recent Folder Not Saved",
+                "This folder will be scanned, but it could not be added to the recent list.",
+                detail=str(exc),
+            )
         self._refresh_recent_menu()
         self._study_explorer_panel.show_scanning()
         self._metadata_panel.show_initial()
@@ -545,14 +558,31 @@ class MainWindow(QMainWindow):
             viewing=viewing,
             measurements=measurements,
         )
-        self._settings_manager.update(updated)
+        try:
+            self._settings_manager.update(updated)
+        except SettingsError as exc:
+            self._error_presenter.show_warning(
+                self,
+                "Settings Not Saved",
+                "The new preferences apply for this session, but they could not be saved.",
+                detail=str(exc),
+            )
         self._apply_viewing_preferences()
         self._apply_default_window_preset()
         self._status_bar.showMessage("Settings saved.")
 
     def _reset_settings(self) -> Settings:
         """Restore the bundled defaults and refresh the whole application."""
-        settings = self._settings_manager.reset()
+        try:
+            settings = self._settings_manager.reset()
+        except SettingsError as exc:
+            self._error_presenter.show_error(
+                self,
+                "Settings Reset Failed",
+                "The default settings could not be restored.",
+                detail=str(exc),
+            )
+            settings = self._settings_manager.current_settings
         self._theme_controller.apply_current()
         self._catalog.refresh_icons()
         self._status_bar.set_theme(THEMES[settings.appearance.theme].display_name)
@@ -608,7 +638,16 @@ class MainWindow(QMainWindow):
     def _open_recent_folder(self, folder: Path) -> None:
         """Open a recently used folder, dropping it when it no longer exists."""
         if not folder.is_dir():
-            self._settings_manager.remove_recent_folder(folder)
+            try:
+                self._settings_manager.remove_recent_folder(folder)
+            except SettingsError as exc:
+                self._error_presenter.show_warning(
+                    self,
+                    "Recent Folder Not Removed",
+                    "The folder no longer exists, but it could not be removed "
+                    "from the recent list.",
+                    detail=str(exc),
+                )
             self._refresh_recent_menu()
             self._status_bar.showMessage("That folder no longer exists.")
             return
@@ -627,7 +666,17 @@ class MainWindow(QMainWindow):
 
     def _change_theme(self, theme_name: str) -> None:
         """Switch the theme, refresh icons and update the status bar."""
-        self._theme_controller.switch(theme_name)
+        try:
+            self._theme_controller.switch(theme_name)
+        except SettingsError as exc:
+            # The snapshot is adopted in memory either way; persistence
+            # failures are non-fatal and only reported to the user.
+            self._error_presenter.show_warning(
+                self,
+                "Theme Preference Not Saved",
+                "The theme changed for this session, but it could not be saved.",
+                detail=str(exc),
+            )
         self._catalog.refresh_icons()
         self._status_bar.set_theme(THEMES[theme_name].display_name)
 

@@ -47,13 +47,13 @@ class ThemeManager:
     def switch(self, theme: str) -> None:
         """Switch, persist and confirm the active theme."""
         updated = _with_theme(self._settings, theme)
-        self._store.save(updated)
         self._settings = updated
+        self._store.save(updated)
 
     def update(self, settings: Settings) -> None:
         """Persist and adopt a complete new settings snapshot."""
-        self._store.save(settings)
         self._settings = settings
+        self._store.save(settings)
 
     def reset(self) -> Settings:
         """Discard user overrides, adopt and return the default settings."""

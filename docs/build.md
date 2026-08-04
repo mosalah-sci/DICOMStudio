@@ -78,4 +78,4 @@ powershell -ExecutionPolicy Bypass -File scripts\release.ps1
 - [ ] On a clean machine: install, launch, open a DICOM folder, verify
       settings persist, verify resources load, uninstall cleanly.
 - [ ] Bump `src/dicomviewer/_version.py`, update `CHANGELOG.md`, commit, and
-      create an annotated tag (`v0.11.0`).
+      create an annotated tag (`v1.0.0`).

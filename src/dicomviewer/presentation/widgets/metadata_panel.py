@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from pathlib import Path
 
+from loguru import logger
 from PySide6.QtCore import QPoint, Qt
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
@@ -191,6 +192,11 @@ class MetadataPanel(QWidget):
             document = self._service.extract(image)
         except MetadataExtractionError:
             return None
+        except Exception:
+            # A malformed file must not crash the panel; treat it as
+            # unavailable and surface the problem to the user.
+            logger.exception("Unexpected metadata extraction failure for %s", image.path)
+            return None
         self._cache[image.path] = document
         self._evict_cache()
         return document
@@ -207,7 +213,17 @@ class MetadataPanel(QWidget):
                 break
 
     def _rebuild_tree(self, document: MetadataDocument) -> None:
-        """Populate the tree from a (possibly filtered) metadata document."""
+        """Populate the tree from a (possibly filtered) metadata document.
+
+        The expanded/collapsed state of existing groups is preserved so that
+        navigating slices or typing a search does not forcibly re-expand
+        groups the user collapsed.
+        """
+        expanded: set[str] = set()
+        for i in range(self._tree.topLevelItemCount()):
+            item = self._tree.topLevelItem(i)
+            if item is not None and item.isExpanded():
+                expanded.add(item.text(0))
         self._tree.clear()
         for group in document.groups:
             group_item = QTreeWidgetItem(self._tree)
@@ -218,7 +234,7 @@ class MetadataPanel(QWidget):
             group_item.setFont(0, font)
             for element in group.elements:
                 self._add_element(group_item, element)
-        self._tree.expandAll()
+            group_item.setExpanded(group.name in expanded)
 
     def _add_element(self, parent: QTreeWidgetItem, element: MetadataElement) -> None:
         """Add one metadata element row under ``parent``."""

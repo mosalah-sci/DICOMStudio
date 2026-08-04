@@ -10,10 +10,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from dicomviewer.application.viewing import PixelArray
 from dicomviewer.domain.measurement import (
     Measurement,
     MeasurementKind,
+    angle_degrees,
     distance_pixels,
     distance_with_spacing,
 )
@@ -23,11 +23,12 @@ from dicomviewer.domain.measurement import (
 class MeasurementCollection:
     """Per-slice measurement storage with label rendering.
 
-    ``pixel_array`` carries the pixel spacing used to compute physical
-    distances; it is only needed for text, never for the point positions.
+    ``pixel_spacing`` carries the DICOM row/column spacing used to compute
+    physical distances; only the spacing is retained, never the full decoded
+    frame, so the collection does not pin pixel data in memory.
     """
 
-    pixel_array: PixelArray | None = None
+    pixel_spacing: tuple[float, float] | None = None
     _entries: dict[int, list[Measurement]] = field(default_factory=dict[int, list[Measurement]])
 
     def add(self, slice_index: int, measurement: Measurement) -> None:
@@ -66,28 +67,29 @@ class MeasurementCollection:
 
 def measurement_label(
     measurement: Measurement,
-    pixel_array: PixelArray | None,
+    pixel_spacing: tuple[float, float] | None,
 ) -> str:
     """Return the human-readable label for ``measurement``.
 
-    Distances use the pixel spacing when the array provides one, otherwise
-    they fall back to plain pixels. Angles are always reported in degrees.
+    Distances use the pixel spacing when one is provided, otherwise they fall
+    back to plain pixels. Angles are always reported in degrees.
     """
     if measurement.kind is MeasurementKind.DISTANCE:
-        return _distance_label(measurement, pixel_array)
+        return _distance_label(measurement, pixel_spacing)
     return _angle_label(measurement)
 
 
-def _distance_label(measurement: Measurement, pixel_array: PixelArray | None) -> str:
+def _distance_label(
+    measurement: Measurement,
+    pixel_spacing: tuple[float, float] | None,
+) -> str:
     pixels = distance_pixels(measurement)
-    if pixel_array is not None:
-        spacing = pixel_array.pixel_spacing
-        millimetres = distance_with_spacing(measurement, spacing[0], spacing[1])
+    if pixel_spacing is not None:
+        row_spacing, column_spacing = pixel_spacing
+        millimetres = distance_with_spacing(measurement, row_spacing, column_spacing)
         return f"{millimetres:.2f} mm  ({pixels:.2f} px)"
     return f"{pixels:.2f} px"
 
 
 def _angle_label(measurement: Measurement) -> str:
-    from dicomviewer.domain.measurement import angle_degrees
-
     return f"{angle_degrees(measurement):.1f}°"

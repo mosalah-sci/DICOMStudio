@@ -10,7 +10,7 @@ imaging platform (PACS, MPR, 3D, AI-assisted analysis, and more).
 
 ## Status
 
-Milestone 11 — Packaging and Distribution (v0.11.0)
+Milestone 12 — Production Readiness (v1.0.0)
 
 ## Technology Stack
 

@@ -59,8 +59,12 @@ class SettingsService:
 
     def save(self, settings: Settings) -> None:
         """Persist settings to the user file, creating parent directories."""
-        self._user_settings_path.parent.mkdir(parents=True, exist_ok=True)
-        self._user_settings_path.write_text(_dumps(settings), encoding="utf-8")
+        try:
+            self._user_settings_path.parent.mkdir(parents=True, exist_ok=True)
+            self._user_settings_path.write_text(_dumps(settings), encoding="utf-8")
+        except OSError as exc:
+            path = self._user_settings_path
+            raise SettingsError(f"Could not save settings file: {path}") from exc
 
     def reset(self) -> None:
         """Discard persisted user overrides, returning to the defaults."""

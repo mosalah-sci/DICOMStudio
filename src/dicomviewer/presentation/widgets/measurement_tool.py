@@ -38,6 +38,7 @@ class MeasurementTool(QObject):
         self._kind: MeasurementKind | None = None
         self._draft: dict[int, list[Point]] = {}
         self._preview: Point | None = None
+        self._preview_slice: int | None = None
 
     @property
     def kind(self) -> MeasurementKind | None:
@@ -53,6 +54,7 @@ class MeasurementTool(QObject):
         self._kind = kind
         self._draft.clear()
         self._preview = None
+        self._preview_slice = None
         self.changed.emit()
 
     def deactivate(self) -> None:
@@ -60,12 +62,14 @@ class MeasurementTool(QObject):
         self._kind = None
         self._draft.clear()
         self._preview = None
+        self._preview_slice = None
         self.changed.emit()
 
     def reset(self) -> None:
         """Discard all drafts without changing the active kind."""
         self._draft.clear()
         self._preview = None
+        self._preview_slice = None
         self.changed.emit()
 
     def draft_points(self) -> list[Point]:
@@ -74,6 +78,8 @@ class MeasurementTool(QObject):
 
     def preview_point(self) -> Point | None:
         """Return the pointer position preview for the current slice, if any."""
+        if self._preview_slice != self._viewer.current_slice:
+            return None
         return self._preview
 
     def handle_press(self, position: QPointF) -> None:
@@ -84,9 +90,11 @@ class MeasurementTool(QObject):
         points = self._draft.setdefault(slice_index, [])
         points.append(self._viewer.widget_to_image(position))
         self._preview = self._viewer.widget_to_image(position)
+        self._preview_slice = slice_index
         if len(points) >= required_point_count(self._kind):
             self._draft[slice_index] = []
             self._preview = None
+            self._preview_slice = None
             self.commit_requested.emit(Measurement(self._kind, tuple(points)))
         self.changed.emit()
 
@@ -98,6 +106,7 @@ class MeasurementTool(QObject):
         if not points or len(points) >= required_point_count(self._kind):
             return
         self._preview = self._viewer.widget_to_image(position)
+        self._preview_slice = self._viewer.current_slice
         self.changed.emit()
 
     def cancel_draft(self) -> None:
@@ -106,13 +115,15 @@ class MeasurementTool(QObject):
         if self._draft.get(slice_index):
             self._draft[slice_index] = []
         self._preview = None
+        self._preview_slice = None
         self.changed.emit()
 
     def paint(self, painter: QPainter) -> None:
         """Draw the placed points, preview and connecting lines."""
         points = list(self.draft_points())
-        if self._preview is not None:
-            points.append(self._preview)
+        preview = self.preview_point()
+        if preview is not None:
+            points.append(preview)
         if not points:
             return
         widgets = [self._viewer.image_to_widget(point) for point in points]

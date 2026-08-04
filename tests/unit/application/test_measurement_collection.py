@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-import numpy as np
-
 from dicomviewer.application.measurement import MeasurementCollection, measurement_label
-from dicomviewer.application.viewing import PixelArray
 from dicomviewer.domain.measurement import Measurement, MeasurementKind, Point
 
 
@@ -46,21 +43,14 @@ def test_collection_clear_slice_and_clear_all() -> None:
 
 
 def test_distance_label_uses_pixel_spacing_when_available() -> None:
-    collection = MeasurementCollection(
-        pixel_array=PixelArray(
-            pixels=np.zeros((6, 8), dtype=np.uint16),
-            width=8,
-            height=6,
-            pixel_spacing=(0.5, 0.5),
-        )
-    )
+    collection = MeasurementCollection(pixel_spacing=(0.5, 0.5))
     # 5 pixels along the hypotenuse at 0.5 mm per axis -> 2.5 mm.
-    assert measurement_label(_distance(), collection.pixel_array) == "2.50 mm  (5.00 px)"
+    assert measurement_label(_distance(), collection.pixel_spacing) == "2.50 mm  (5.00 px)"
 
 
 def test_distance_label_falls_back_to_pixels() -> None:
     collection = MeasurementCollection()
-    assert measurement_label(_distance(), collection.pixel_array) == "5.00 px"
+    assert measurement_label(_distance(), collection.pixel_spacing) == "5.00 px"
 
 
 def test_angle_label_reports_degrees() -> None:

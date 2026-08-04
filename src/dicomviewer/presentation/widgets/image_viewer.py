@@ -9,7 +9,9 @@ input and paints the resulting frame.
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import replace
 
+from loguru import logger
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import (
     QColor,
@@ -53,6 +55,10 @@ _WL_LEVEL_PER_PIXEL = 0.5
 _WL_WIDTH_PER_PIXEL = 0.5
 _WL_MIN_WIDTH = 1.0
 _DEFAULT_CACHE_SIZE = 3
+# Rendered RGBA frames are far larger than decoded pixel arrays and are cheap
+# to recreate (re-rendering reuses the decoded frame), so a small fixed cap
+# keeps the render cache from competing with the user-configured decode cache.
+_RENDER_CACHE_SIZE = 2
 _HISTOGRAM_BINS = 128
 _HISTOGRAM_WIDTH = 120
 _HISTOGRAM_HEIGHT = 36
@@ -189,27 +195,27 @@ class ImageViewerWidget(QWidget):
         self.set_slice(self._viewport.slice_index - 1)
 
     def zoom_in(self) -> None:
-        """Zoom in one step and exit fit mode."""
-        self._viewport = self._viewport.with_zoom(self._viewport.zoom * _ZOOM_STEP)
+        """Zoom in one step relative to the current display scale."""
+        self._viewport = self._viewport.with_zoom(self._zoom_base() * _ZOOM_STEP)
         self.zoom_changed.emit(self._viewport.zoom)
         self.update()
 
     def zoom_out(self) -> None:
-        """Zoom out one step and exit fit mode."""
-        self._viewport = self._viewport.with_zoom(self._viewport.zoom / _ZOOM_STEP)
+        """Zoom out one step relative to the current display scale."""
+        self._viewport = self._viewport.with_zoom(self._zoom_base() / _ZOOM_STEP)
         self.zoom_changed.emit(self._viewport.zoom)
         self.update()
 
     def fit_to_window(self) -> None:
         """Fit the image to the current widget size."""
         self._viewport = self._viewport.fit()
-        self.zoom_changed.emit(1.0)
+        self.zoom_changed.emit(self._effective_scale())
         self.update()
 
     def actual_size(self) -> None:
         """Show the image at 100% pixel scale, centered."""
         self._viewport = self._viewport.actual()
-        self.zoom_changed.emit(1.0)
+        self.zoom_changed.emit(self._effective_scale())
         self.update()
 
     def reset_view(self) -> None:
@@ -219,7 +225,7 @@ class ImageViewerWidget(QWidget):
             fit_mode=FitMode.FIT,
         )
         self._render_current()
-        self.zoom_changed.emit(1.0)
+        self.zoom_changed.emit(self._effective_scale())
         self.window_level_changed.emit(None, 0.0)
         self.update()
 
@@ -313,8 +319,8 @@ class ImageViewerWidget(QWidget):
             (position.y() - rect.top()) / rect.height() * image.height(),
         )
         return Point(
-            min(max(point.x, 0.0), float(image.width())),
-            min(max(point.y, 0.0), float(image.height())),
+            min(max(point.x, 0.0), float(image.width() - 1)),
+            min(max(point.y, 0.0), float(image.height() - 1)),
         )
 
     def image_to_widget(self, point: Point) -> QPointF:
@@ -413,6 +419,9 @@ class ImageViewerWidget(QWidget):
         """Scroll slices, or zoom when a zoom modifier is held."""
         modifiers = event.modifiers()
         delta = event.angleDelta().y()
+        if delta == 0:
+            # Trackpads often report pixel deltas with a zero angle delta.
+            delta = event.pixelDelta().y()
         if modifiers & (Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier):
             if delta > 0:
                 self.zoom_in()
@@ -475,7 +484,13 @@ class ImageViewerWidget(QWidget):
         self._drag_mode = mode
         self._drag_start = position
         if mode == _DRAG_PAN:
-            self._viewport = self._viewport.to_free()
+            # Adopt the current display scale before leaving fit mode so the
+            # image does not snap to 100% when the user starts panning.
+            self._viewport = replace(
+                self._viewport,
+                zoom=self._zoom_base(),
+                fit_mode=FitMode.FREE,
+            )
             self._drag_viewport = self._viewport
             self.update()
         elif mode == _DRAG_WINDOW_LEVEL:
@@ -534,12 +549,11 @@ class ImageViewerWidget(QWidget):
                     break
             else:
                 break
-        while len(self._frame_cache) > self._max_cache:
-            oldest = next(iter(self._frame_cache))
-            if oldest[0] != self._viewport.slice_index:
-                del self._frame_cache[oldest]
-            else:
-                break
+        # Frame cache keys include the window/level settings, so a series of
+        # window/level adjustments on one slice must still evict: always drop
+        # the oldest entry (the just-rendered frame is the newest and stays).
+        while len(self._frame_cache) > _RENDER_CACHE_SIZE:
+            del self._frame_cache[next(iter(self._frame_cache))]
 
     def _analysis_for(self, index: int) -> tuple[PixelStatistics, Histogram] | None:
         """Return the cached analysis of ``index``, computing it on demand."""
@@ -554,7 +568,7 @@ class ImageViewerWidget(QWidget):
         except Exception as exc:
             # Analysis is best-effort display metadata; a failure must not
             # interrupt painting or decoding of the frame itself.
-            self._last_error = str(exc)
+            logger.warning("Image analysis failed for slice {}: {}", index, exc)
             return None
         self._slice_analysis[index] = analysis
         return analysis
@@ -566,7 +580,7 @@ class ImageViewerWidget(QWidget):
             self._rendered = None
             self._qimage = None
             return
-        self._measurements.pixel_array = pixels
+        self._measurements.pixel_spacing = pixels.pixel_spacing
         cache_key = (
             self._viewport.slice_index,
             self._viewport.window_center,
@@ -578,6 +592,8 @@ class ImageViewerWidget(QWidget):
                 rendered = self._renderer.render(pixels, self._viewport)
             except RenderingError as exc:
                 self._last_error = str(exc)
+                self._rendered = None
+                self._qimage = None
                 return
             self._frame_cache[cache_key] = rendered
             self._evict_cache()
@@ -597,6 +613,16 @@ class ImageViewerWidget(QWidget):
             return min(width / image.width(), height / image.height())
         if self._viewport.fit_mode == FitMode.ACTUAL:
             return 1.0
+        return self._viewport.zoom
+
+    def _zoom_base(self) -> float:
+        """Return the scale a relative zoom step should start from.
+
+        In fit mode the stored zoom is a placeholder, so the effective display
+        scale is used as the base; otherwise the current free zoom applies.
+        """
+        if self._viewport.fit_mode == FitMode.FIT:
+            return self._effective_scale()
         return self._viewport.zoom
 
     def _target_rect(self, image: QImage) -> QRectF:
@@ -648,9 +674,9 @@ class ImageViewerWidget(QWidget):
     def _paint_measurements(self, painter: QPainter) -> None:
         """Draw completed measurements and the in-progress draft."""
         measurements = self._measurements.for_slice(self.current_slice)
-        pixel_array = self._measurements.pixel_array
+        pixel_spacing = self._measurements.pixel_spacing
         for measurement in measurements:
-            self._draw_measurement(painter, measurement, pixel_array)
+            self._draw_measurement(painter, measurement, pixel_spacing)
         if self._measure_tool.is_active():
             self._measure_tool.paint(painter)
 
@@ -658,7 +684,7 @@ class ImageViewerWidget(QWidget):
         self,
         painter: QPainter,
         measurement: Measurement,
-        pixel_array: PixelArray | None,
+        pixel_spacing: tuple[float, float] | None,
     ) -> None:
         """Draw one completed measurement with its handle points and label."""
         points = [self.image_to_widget(point) for point in measurement.points]
@@ -667,7 +693,7 @@ class ImageViewerWidget(QWidget):
         painter.setBrush(QColor(self._measurement_color))
         for point in points:
             painter.drawEllipse(point, 3.0, 3.0)
-        label = measurement_label(measurement, pixel_array)
+        label = measurement_label(measurement, pixel_spacing)
         if measurement.kind is MeasurementKind.DISTANCE:
             painter.setPen(QPen(QColor(self._measurement_color), 1.5))
             painter.drawLine(points[0], points[1])

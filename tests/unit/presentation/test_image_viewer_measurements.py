@@ -193,8 +193,7 @@ def test_pixel_spacing_flows_from_the_decoder(qapp) -> None:
         pixel_spacing=(0.5, 0.5),
     )
     viewer = _viewer(decoder=FakePixelDecoder(pixels=pixels))
-    assert viewer.measurements.pixel_array is not None
-    assert viewer.measurements.pixel_array.pixel_spacing == (0.5, 0.5)
+    assert viewer.measurements.pixel_spacing == (0.5, 0.5)
 
 
 def test_measurement_tool_remains_active_across_slices(qapp) -> None:
