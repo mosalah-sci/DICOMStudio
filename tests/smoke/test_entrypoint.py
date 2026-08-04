@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+from pathlib import Path
 
 from dicomviewer import __version__
 
@@ -45,3 +46,14 @@ def test_invalid_theme_is_rejected() -> None:
 def test_missing_theme_value_is_rejected() -> None:
     result = _run_dicomviewer("--theme")
     assert result.returncode == 2
+
+
+def test_positional_path_is_accepted() -> None:
+    result = _run_dicomviewer("--smoke-test", str(Path(__file__).resolve()))
+    assert result.returncode == 0
+
+
+def test_positional_path_does_not_break_version_flag() -> None:
+    result = _run_dicomviewer("--version", str(Path(__file__).resolve()))
+    assert result.returncode == 0
+    assert __version__ in result.stdout

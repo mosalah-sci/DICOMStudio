@@ -10,7 +10,7 @@ imaging platform (PACS, MPR, 3D, AI-assisted analysis, and more).
 
 ## Status
 
-Milestone 1 — Project Foundation (v0.1.0)
+Milestone 11 — Packaging and Distribution (v0.11.0)
 
 ## Technology Stack
 
@@ -26,7 +26,7 @@ Milestone 1 — Project Foundation (v0.1.0)
 | Formatting  | Black                                                       |
 | Linting     | Ruff                                                        |
 | Typing      | Pyright (strict)                                            |
-| Packaging   | uv / hatchling (PyInstaller at a later milestone)           |
+| Packaging   | uv / hatchling, PyInstaller, Inno Setup                      |
 
 ## Quickstart
 
@@ -40,13 +40,16 @@ uv run python -m dicomviewer         # launch the application
 Utility scripts (`scripts/`):
 
 ```powershell
-.\scripts\dev.ps1        # sync the environment
-.\scripts\run.ps1        # run the application
-.\scripts\format.ps1     # format with Black
-.\scripts\lint.ps1       # lint with Ruff
-.\scripts\typecheck.ps1  # type check with Pyright
-.\scripts\test.ps1       # run tests
-.\scripts\build.ps1      # build distributions
+.\scripts\dev.ps1            # sync the environment
+.\scripts\run.ps1            # run the application
+.\scripts\format.ps1         # format with Black
+.\scripts\lint.ps1           # lint with Ruff
+.\scripts\typecheck.ps1      # type check with Pyright
+.\scripts\test.ps1           # run tests
+.\scripts\build.ps1          # build Python distributions (wheel + sdist)
+.\scripts\build_standalone.ps1  # build the standalone Windows application
+.\scripts\build_portable.ps1    # build the portable zip archive
+.\scripts\release.ps1        # full release: tests, standalone, installer, portable
 ```
 
 Command line options:
@@ -54,7 +57,19 @@ Command line options:
 ```powershell
 uv run python -m dicomviewer --version      # print version and exit
 uv run python -m dicomviewer --smoke-test   # launch, auto-exit (CI smoke test)
+uv run python -m dicomviewer <folder>       # open a folder of DICOM studies
+uv run python -m dicomviewer <file.dcm>     # open a DICOM file's folder
 ```
+
+## Distribution
+
+Windows end users can install the app with the Inno Setup installer
+(`dist/installer/DicomViewer-Professional-<version>-Setup.exe`), use it as a
+portable app (extract
+`dist/DicomViewer-Professional-<version>-Portable.zip`), or run the standalone
+folder in `dist/DicomViewer/`. No Python is required. See
+`docs/build.md` for the release process and `docs/user/README.md` for the
+installation guide.
 
 ## Repository Layout
 
@@ -65,7 +80,8 @@ docs/                project documentation and architecture decision records
 config/              configuration reference material
 resources/           runtime-bundled assets (icons, styles, application icon)
 assets/              repository-only media (branding, screenshots)
-scripts/             reproducible development workflows
+packaging/           Windows packaging (PyInstaller spec, Inno Setup script, icon)
+scripts/             reproducible development and release workflows
 ```
 
 ## Architecture

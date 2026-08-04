@@ -12,6 +12,11 @@ docs/
 └── user/           End-user documentation
 ```
 
+Key guides:
+
+- `docs/build.md` — building and releasing the Windows distributions.
+- `docs/user/README.md` — end-user installation guide.
+
 ## Architecture Decision Records
 
 Every significant architectural decision is recorded in
@@ -25,4 +30,6 @@ here. The first artifacts land with the Application Shell milestone.
 
 ## User
 
-End-user documentation is authored during the release cycle.
+End-user documentation is authored during the release cycle — see
+`docs/user/README.md` (installation guide) and `docs/build.md` (release
+process).

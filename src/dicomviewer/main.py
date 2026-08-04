@@ -11,6 +11,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from importlib.resources import as_file, files
 from pathlib import Path
+from typing import TextIO
 
 from loguru import logger
 from PySide6.QtCore import QTimer
@@ -45,6 +46,7 @@ class CliOptions:
     show_version: bool = False
     smoke_test: bool = False
     theme: str | None = None
+    path: Path | None = None
     qt_arguments: tuple[str, ...] = ()
 
 
@@ -56,10 +58,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         options = _parse_arguments(sys.argv[1:] if argv is None else argv)
     except SettingsError as exc:
-        print(f"{APP_NAME}: {exc}", file=sys.stderr)
+        _write(f"{APP_NAME}: {exc}", stream=sys.stderr)
         return 2
     if options.show_version:
-        print(f"{APP_NAME} {__version__}")
+        _write(f"{APP_NAME} {__version__}")
         return 0
 
     _prepare_qt_environment()
@@ -74,7 +76,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             theme_manager.apply_override(options.theme)
     except SettingsError as exc:
         logger.error("Configuration error: {}", exc)
-        print(f"{APP_NAME}: {exc}", file=sys.stderr)
+        _write(f"{APP_NAME}: {exc}", stream=sys.stderr)
         return 2
     configure_logging(settings.logging, paths.logs_dir)
 
@@ -100,10 +102,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     theme_controller.apply_current()
     window.show()
 
+    if options.path is not None:
+        launch_path = options.path
+        QTimer.singleShot(0, lambda: window.open_path(launch_path))
     if options.smoke_test:
-        QTimer.singleShot(500, application.quit)
+        QTimer.singleShot(500, window.close)
 
     exit_code = application.exec()
+    # Ensure the window is closed even when the loop exits another way, so the
+    # close handler stops any running scan thread before teardown.
+    window.close()
     logger.info("{name} stopped with exit code {code}", name=APP_NAME, code=exit_code)
     return exit_code
 
@@ -118,6 +126,7 @@ def _parse_arguments(argv: Sequence[str]) -> CliOptions:
     show_version = False
     smoke_test = False
     theme: str | None = None
+    path: Path | None = None
     qt_arguments: list[str] = []
     index = 0
     while index < len(argv):
@@ -133,10 +142,25 @@ def _parse_arguments(argv: Sequence[str]) -> CliOptions:
             theme = argv[index]
         elif argument.startswith("--theme="):
             theme = argument.split("=", 1)[1]
+        elif argument.startswith("-"):
+            qt_arguments.append(argument)
+        elif path is None:
+            path = Path(argument)
         else:
             qt_arguments.append(argument)
         index += 1
-    return CliOptions(show_version, smoke_test, theme, tuple(qt_arguments))
+    return CliOptions(show_version, smoke_test, theme, path, tuple(qt_arguments))
+
+
+def _write(message: str, stream: TextIO | None = None) -> None:
+    """Write ``message`` to a stream, tolerating a missing console.
+
+    Frozen windowed builds have no attached console, so ``sys.stdout`` and
+    ``sys.stderr`` are ``None`` and must not be written to.
+    """
+    target = stream if stream is not None else sys.stdout
+    if target is not None:
+        target.write(f"{message}\n")
 
 
 def _icons_dir() -> Path:

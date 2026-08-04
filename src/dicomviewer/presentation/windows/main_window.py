@@ -614,6 +614,17 @@ class MainWindow(QMainWindow):
             return
         self._start_scan(folder)
 
+    def open_path(self, path: Path) -> None:
+        """Open a file or folder passed on the command line (file association).
+
+        Individual DICOM files are opened by scanning their parent directory,
+        matching how the study explorer groups files by study and series.
+        """
+        if path.is_dir():
+            self._start_scan(path)
+        elif path.is_file():
+            self._start_scan(path.parent)
+
     def _change_theme(self, theme_name: str) -> None:
         """Switch the theme, refresh icons and update the status bar."""
         self._theme_controller.switch(theme_name)

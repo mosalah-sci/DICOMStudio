@@ -5,6 +5,43 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.11.0] - 2026-08-04
+
+### Added
+
+- Packaging and Distribution:
+  - Standalone Windows application built with PyInstaller (onedir) that runs
+    with no Python installation. The launcher embeds the application icon and
+    a generated Windows version resource (file version, product name,
+    copyright, company placeholder).
+  - Professional Windows installer built with Inno Setup: Start Menu and
+    optional desktop shortcuts, `.dcm` file associations, embedded version
+    metadata, and a full uninstaller that removes the app, shortcuts and
+    registry entries cleanly.
+  - Portable zip distribution for USB / no-install use, produced from the same
+    frozen payload as the installer.
+  - Release automation (`scripts/release.ps1`) that runs the test suite,
+    builds the standalone app, smoke-tests it, compiles the installer and
+    produces the portable archive in one pass.
+  - Application icon pipeline (`packaging/app-icon.svg`,
+    `scripts/make_icon.py`) that renders a multi-resolution `DicomViewer.ico`
+    shared by the executable, installer and shortcuts.
+  - Version resource pipeline (`scripts/make_version_info.py`) that
+    regenerates `packaging/version_info.txt` from the single version source.
+  - ADR-020 (Windows packaging and distribution strategy) and a build/release
+    guide (`docs/build.md`); the end-user installation guide
+    (`docs/user/README.md`) is now authored.
+- Command line: the app accepts an optional positional file or folder argument
+  so shell file associations open a DICOM image's containing directory on
+  launch.
+
+### Changed
+
+- Shutdown now always closes the main window before the interpreter tears
+  down, so a running scan thread is stopped cleanly and the process exits 0
+  even when a scan is in progress.
+- Application version bumped to 0.11.0.
+
 ## [0.10.0] - 2026-08-04
 
 ### Changed

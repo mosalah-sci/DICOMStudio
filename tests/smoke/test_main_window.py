@@ -449,6 +449,46 @@ def test_open_recent_folder_drops_a_missing_folder(
     assert "no longer exists" in window.statusBar().currentMessage()
 
 
+def test_open_path_scans_a_directory(
+    make_window: Callable[..., MainWindow],
+    qapp: QApplication,
+    tmp_path: Path,
+) -> None:
+    scanner = FakeStudyScanner(tree=_sample_tree())
+    window = make_window(study_scanner=scanner)
+    folder = tmp_path / "studies"
+    folder.mkdir()
+    window.open_path(folder)
+    assert pump_until(qapp, lambda: scanner.calls == [folder])
+
+
+def test_open_path_scans_a_file_parent_directory(
+    make_window: Callable[..., MainWindow],
+    qapp: QApplication,
+    tmp_path: Path,
+) -> None:
+    scanner = FakeStudyScanner(tree=_sample_tree())
+    window = make_window(study_scanner=scanner)
+    folder = tmp_path / "studies"
+    folder.mkdir()
+    dicom_file = folder / "a.dcm"
+    dicom_file.touch()
+    window.open_path(dicom_file)
+    assert pump_until(qapp, lambda: scanner.calls == [folder])
+
+
+def test_open_path_ignores_a_missing_path(
+    make_window: Callable[..., MainWindow],
+    qapp: QApplication,
+    tmp_path: Path,
+) -> None:
+    scanner = FakeStudyScanner(tree=_sample_tree())
+    window = make_window(study_scanner=scanner)
+    window.open_path(tmp_path / "missing")
+    qapp.processEvents()
+    assert scanner.calls == []
+
+
 def test_apply_settings_persists_and_updates_the_viewer(
     make_window: Callable[..., MainWindow],
 ) -> None:

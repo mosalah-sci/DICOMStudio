@@ -34,3 +34,4 @@ that future contributors understand not only *what* the codebase does, but
 | ADR-017 | Settings model in the Domain layer                     | Accepted |
 | ADR-018 | Window state persistence                               | Accepted |
 | ADR-019 | Application action architecture                        | Accepted |
+| ADR-020 | Windows packaging and distribution strategy            | Accepted |
