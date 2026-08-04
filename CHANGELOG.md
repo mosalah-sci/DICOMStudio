@@ -5,6 +5,26 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.10.0] - 2026-08-04
+
+### Changed
+
+- Performance Optimization:
+  - Thumbnails are now sampled down to the target bounding box *before* the
+    float rescale, percentile and normalization run, so the expensive image
+    math operates on the small preview instead of the full frame. Windowed
+    datasets render byte-for-byte identically to before; on a 512x512 frame
+    generation drops from ~12.6 ms to ~0.2 ms (~60x), with even larger wins on
+    big frames.
+  - The image analyzer gained a combined `analyze()` operation that rescales
+    the frame once and computes both statistics and the histogram from the same
+    array (previously each metric rescale separately), and the histogram is
+    binned with a linear floor + `np.bincount` pass instead of `np.histogram`'s
+    sort. Slice analysis is ~2x faster; the viewer now uses the combined path.
+  - Added `scripts/benchmark.py` to measure render, analysis and thumbnail
+    timings for before/after verification of future performance work.
+- Application version bumped to 0.10.0.
+
 ## [0.9.0] - 2026-08-04
 
 ### Added

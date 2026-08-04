@@ -17,6 +17,7 @@ from dicomviewer.domain.settings import MeasurementSettings, ViewingSettings
 from dicomviewer.domain.studies import Image, Patient, Series, Study, StudyTree
 from dicomviewer.presentation.actions.action_ids import ActionId
 from dicomviewer.presentation.windows.main_window import MainWindow
+from dicomviewer.shared.constants import __version__
 from tests.dicom_utils import FakeImageExporter, FakeStudyScanner
 from tests.qt_utils import pump_until
 
@@ -30,7 +31,7 @@ def _sample_tree() -> StudyTree:
 
 def test_main_window_has_expected_title(make_window: Callable[..., MainWindow]) -> None:
     window = make_window()
-    assert window.windowTitle() == "DICOM Viewer Professional - v0.9.0"
+    assert window.windowTitle() == f"DICOM Viewer Professional - v{__version__}"
 
 
 def test_main_window_shows_an_empty_state(make_window: Callable[..., MainWindow]) -> None:

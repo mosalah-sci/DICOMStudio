@@ -6,6 +6,8 @@ import os
 import subprocess
 import sys
 
+from dicomviewer import __version__
+
 
 def _run_dicomviewer(*arguments: str) -> subprocess.CompletedProcess[str]:
     environment = {**os.environ, "QT_QPA_PLATFORM": "offscreen"}
@@ -22,7 +24,7 @@ def _run_dicomviewer(*arguments: str) -> subprocess.CompletedProcess[str]:
 def test_version_flag_prints_the_version() -> None:
     result = _run_dicomviewer("--version")
     assert result.returncode == 0
-    assert "0.9.0" in result.stdout
+    assert __version__ in result.stdout
 
 
 def test_smoke_test_starts_and_exits_cleanly() -> None:

@@ -78,3 +78,30 @@ def test_generate_handles_color_pixels(tmp_path: Path) -> None:
     assert thumbnail is not None
     assert isinstance(thumbnail, Thumbnail)
     assert thumbnail.width == 64 and thumbnail.height == 64
+
+
+def test_generate_samples_before_windowing_for_byte_identical_output(
+    tmp_path: Path,
+) -> None:
+    pixels = np.tile(np.arange(16, dtype=np.uint16), (12, 1))
+    path = tmp_path / "windowed.dcm"
+    write_pixel_dataset(path, pixels, window_center=8, window_width=4)
+    thumbnail = SERVICE.generate(Image(path, 1), size=64)
+    assert thumbnail is not None
+
+    data = np.frombuffer(thumbnail.data, dtype=np.uint8).reshape(thumbnail.height, thumbnail.width)
+    assert data.shape == (48, 64)
+    assert data.min() <= 128 <= data.max()
+
+
+def test_generate_downscales_large_frames_to_the_bounding_box(
+    tmp_path: Path,
+) -> None:
+    rng = np.random.default_rng(5)
+    pixels = rng.integers(0, 4096, (1024, 512)).astype(np.uint16)
+    path = tmp_path / "large.dcm"
+    write_pixel_dataset(path, pixels, window_center=2048, window_width=2048)
+    thumbnail = SERVICE.generate(Image(path, 1), size=64)
+    assert thumbnail is not None
+    assert thumbnail.width == 32
+    assert thumbnail.height == 64

@@ -173,6 +173,11 @@ class FakeImageAnalyzer:
         self.histogram_calls.append((pixels, bins))
         return self.histogram_result
 
+    def analyze(self, pixels: PixelArray, bins: int = 256) -> tuple[PixelStatistics, Histogram]:
+        self.statistics_calls.append(pixels)
+        self.histogram_calls.append((pixels, bins))
+        return self.statistics_result, self.histogram_result
+
 
 def sample_metadata_document(
     *,

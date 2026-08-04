@@ -550,10 +550,7 @@ class ImageViewerWidget(QWidget):
         if pixels is None:
             return None
         try:
-            analysis = (
-                self._analyzer.statistics(pixels),
-                self._analyzer.histogram(pixels, bins=_HISTOGRAM_BINS),
-            )
+            analysis = self._analyzer.analyze(pixels, bins=_HISTOGRAM_BINS)
         except Exception as exc:
             # Analysis is best-effort display metadata; a failure must not
             # interrupt painting or decoding of the frame itself.

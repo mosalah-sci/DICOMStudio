@@ -47,9 +47,10 @@ class PydicomThumbnailService:
             return None
 
         try:
-            rescaled = self._rescale(grayscale, dataset)
+            sampled, width, height = self._sample(grayscale, size)
+            rescaled = self._rescale(sampled, dataset)
             normalized = self._normalize(rescaled, dataset)
-            data, width, height = self._fit(normalized, size)
+            data = (normalized * 255.0).round().astype(np.uint8)
         except Exception:
             logger.debug("Could not render thumbnail: {}", image.path)
             return None
@@ -102,14 +103,20 @@ class PydicomThumbnailService:
             return center, width
         return float(array.min() + array.max()) / 2.0, 0.0
 
-    def _fit(self, normalized: np.ndarray, size: int) -> tuple[np.ndarray, int, int]:
-        """Scale the image to fit a square bounding box, preserving aspect."""
-        height, width = normalized.shape
+    def _sample(self, array: np.ndarray, size: int) -> tuple[np.ndarray, int, int]:
+        """Downsample ``array`` to fit a square bounding box, preserving aspect.
+
+        The image is sampled *before* rescaling and windowing so the expensive
+        float rescale, percentile and normalization work on the small target
+        resolution instead of the full frame. Sampling is a plain nearest-row/
+        column selection, so a windowed dataset renders byte-for-byte the same
+        as the previous full-resolution pipeline.
+        """
+        height, width = array.shape
         scale = size / max(height, width)
         new_height = max(1, round(height * scale))
         new_width = max(1, round(width * scale))
         row_indices = (np.arange(new_height) * height / new_height).astype(np.int64)
         col_indices = (np.arange(new_width) * width / new_width).astype(np.int64)
-        sampled = normalized[row_indices][:, col_indices]
-        data = (sampled * 255.0).round().astype(np.uint8)
-        return data, new_width, new_height
+        sampled = array[row_indices][:, col_indices]
+        return sampled, new_width, new_height

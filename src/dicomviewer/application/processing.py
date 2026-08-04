@@ -61,6 +61,10 @@ class ImageAnalyzer(Protocol):
         """Return a histogram of the rescaled pixel values using ``bins`` bins."""
         ...
 
+    def analyze(self, pixels: PixelArray, bins: int = 256) -> tuple[PixelStatistics, Histogram]:
+        """Return statistics and a histogram from a single rescale of the frame."""
+        ...
+
 
 class ProcessingStage(Protocol):
     """One transform in the non-destructive image processing chain."""
