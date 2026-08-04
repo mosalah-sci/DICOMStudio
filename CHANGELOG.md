@@ -5,6 +5,34 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.9.0] - 2026-08-04
+
+### Added
+
+- Settings & User Preferences:
+  - Settings dialog expanded from appearance only to three sections:
+    Appearance (theme), Viewing (default window preset, render cache size,
+    smooth scaling, statistics and measurement overlay toggles) and
+    Measurements (overlay colour picker).
+  - Live theme preview and an instant Apply that updates the interface without
+    closing the dialog; validation guards invalid values before saving.
+  - A Restore Defaults button resets all preferences to the bundled defaults
+    and refreshes the whole application.
+  - Viewing preferences are pushed to the image viewer at startup and on every
+    save: cache size, smooth scaling, statistics/measurement overlay visibility
+    and the measurement overlay colour (hex `#RRGGBB`).
+  - Configurable default window preset applied automatically when a series is
+    opened.
+  - Recent Folders: the folders you open are tracked (most recent first,
+    capped at 8) and listed in File > Recent Folders; entries open the folder
+    and missing folders are dropped automatically.
+  - Typed settings model extended with `RecentFoldersSettings`,
+    `ViewingSettings` and `MeasurementSettings`, validated at load and on
+    update.
+  - `ThemeManager` is now the settings lifecycle owner (update, reset, recent
+    folder management) behind the `SettingsStore` port.
+  - Application version bumped to 0.9.0.
+
 ## [0.8.0] - 2026-08-04
 
 ### Added

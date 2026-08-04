@@ -56,6 +56,16 @@ def test_capture_preserves_measurement_overlays(qapp) -> None:
     assert _contains_colour(capture.data, (34, 211, 238))
 
 
+def test_capture_uses_the_configured_measurement_colour(qapp) -> None:
+    viewer = _viewer()
+    viewer.set_measurement_color("#ff0000")
+    viewer.set_measure_mode(MeasurementKind.DISTANCE)
+    QTest.mouseClick(viewer, Qt.MouseButton.LeftButton, pos=QPoint(100, 100))
+    QTest.mouseClick(viewer, Qt.MouseButton.LeftButton, pos=QPoint(200, 150))
+    capture = viewer.capture_view()
+    assert _contains_colour(capture.data, (255, 0, 0))
+
+
 def test_capture_matches_the_current_viewport(qapp) -> None:
     viewer = _viewer()
     fitted = viewer.capture_view()

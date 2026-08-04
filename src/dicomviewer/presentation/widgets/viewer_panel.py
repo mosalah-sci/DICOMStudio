@@ -169,6 +169,26 @@ class ViewerPanel(QWidget):
         """Remove every measurement from every slice."""
         self._viewer.clear_measurements()
 
+    def set_max_cache(self, size: int) -> None:
+        """Set the viewer's decode cache size."""
+        self._viewer.set_max_cache(size)
+
+    def set_smooth_scaling(self, enabled: bool) -> None:
+        """Enable or disable smooth image scaling in the viewer."""
+        self._viewer.set_smooth_scaling(enabled)
+
+    def set_show_statistics_overlay(self, enabled: bool) -> None:
+        """Show or hide the statistics and histogram overlay."""
+        self._viewer.set_show_statistics_overlay(enabled)
+
+    def set_show_measurement_overlay(self, enabled: bool) -> None:
+        """Show or hide the measurement overlay."""
+        self._viewer.set_show_measurement_overlay(enabled)
+
+    def set_measurement_color(self, color: str) -> None:
+        """Set the colour used for measurement overlays."""
+        self._viewer.set_measurement_color(color)
+
     def capture_view(self) -> RenderedImage:
         """Return the current viewport (frame plus overlays) as RGBA bytes."""
         return self._viewer.capture_view()

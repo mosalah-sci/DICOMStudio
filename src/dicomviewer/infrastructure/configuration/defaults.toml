@@ -5,3 +5,16 @@ retention = "7 days"
 
 [appearance]
 theme = "dark"
+
+[recent]
+folders = []
+
+[viewing]
+default_window_preset = ""
+max_cache_size = 3
+smooth_scaling = true
+show_statistics_overlay = true
+show_measurement_overlay = true
+
+[measurements]
+color = "#22d3ee"

@@ -62,6 +62,13 @@ class SettingsService:
         self._user_settings_path.parent.mkdir(parents=True, exist_ok=True)
         self._user_settings_path.write_text(_dumps(settings), encoding="utf-8")
 
+    def reset(self) -> None:
+        """Discard persisted user overrides, returning to the defaults."""
+        try:
+            self._user_settings_path.unlink()
+        except FileNotFoundError:
+            pass
+
 
 def _read_toml(path: Path) -> dict[str, Any]:
     """Parse a TOML file into a plain mapping."""
@@ -88,12 +95,9 @@ def _deep_merge(defaults: Mapping[str, Any], overrides: Mapping[str, Any]) -> di
 def _dumps(settings: Settings) -> str:
     """Serialize settings into TOML text preserving a stable structure."""
     document = tomlkit.document()
-    logging_table = tomlkit.table()
-    logging_table["level"] = settings.logging.level
-    logging_table["rotation"] = settings.logging.rotation
-    logging_table["retention"] = settings.logging.retention
-    document["logging"] = logging_table
-    appearance_table = tomlkit.table()
-    appearance_table["theme"] = settings.appearance.theme
-    document["appearance"] = appearance_table
+    for section, values in settings.to_mapping().items():
+        table = tomlkit.table()
+        for key, value in values.items():
+            table[key] = value
+        document[section] = table
     return tomlkit.dumps(document)

@@ -329,3 +329,46 @@ def test_render_cache_is_bounded(qapp) -> None:
     for index in range(5):
         viewer.set_slice(index)
     assert len(viewer._frame_cache) <= 3
+
+
+def test_preference_setters_update_viewer_state(qapp) -> None:
+    viewer = _viewer()
+    assert viewer._smooth_scaling is True
+    assert viewer._show_statistics_overlay is True
+    assert viewer._show_measurement_overlay is True
+    assert viewer._measurement_color == "#22d3ee"
+
+    viewer.set_smooth_scaling(False)
+    viewer.set_show_statistics_overlay(False)
+    viewer.set_show_measurement_overlay(False)
+    viewer.set_measurement_color("#ff0000")
+    assert viewer._smooth_scaling is False
+    assert viewer._show_statistics_overlay is False
+    assert viewer._show_measurement_overlay is False
+    assert viewer._measurement_color == "#ff0000"
+
+
+def test_set_max_cache_evicts_older_slices(qapp) -> None:
+    viewer = _viewer(max_cache=3)
+    viewer.load_series(_series(count=5))
+    for index in range(5):
+        viewer.set_slice(index)
+    assert len(viewer._cache) <= 3
+    viewer.set_max_cache(1)
+    assert len(viewer._cache) == 1
+    assert viewer.current_slice in viewer._cache
+
+
+def test_overlay_toggles_survive_constructor(qapp) -> None:
+    viewer = ImageViewerWidget(
+        None,
+        FakePixelDecoder(),
+        FakeViewRenderer(),
+        analyzer=FakeImageAnalyzer(),
+        smooth_scaling=False,
+        show_statistics_overlay=False,
+        show_measurement_overlay=False,
+    )
+    assert viewer._smooth_scaling is False
+    assert viewer._show_statistics_overlay is False
+    assert viewer._show_measurement_overlay is False

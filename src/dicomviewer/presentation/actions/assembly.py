@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
+from pathlib import Path
 
 from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QAction
@@ -82,6 +83,31 @@ def _add_window_presets(
         submenu.addAction(action)
         actions.append(action)
     return tuple(actions)
+
+
+def populate_recent_folders_menu(
+    menu: QMenu,
+    recent_folders: Sequence[Path],
+    on_open_recent: Callable[[Path], None] | None = None,
+) -> None:
+    """Populate ``menu`` with one action per recently opened folder.
+
+    The menu is cleared first so callers can re-populate it whenever the
+    recent list changes. An empty list yields a single disabled placeholder.
+    """
+    menu.clear()
+    if not recent_folders:
+        placeholder = QAction("No Recent Folders", menu)
+        placeholder.setEnabled(False)
+        menu.addAction(placeholder)
+        return
+    for folder in recent_folders:
+        action = QAction(str(folder), menu)
+        action.setStatusTip(f"Open {folder}")
+        action.setToolTip(str(folder))
+        if on_open_recent is not None:
+            action.triggered.connect(lambda _checked=False, f=folder: on_open_recent(f))
+        menu.addAction(action)
 
 
 def create_toolbar(main_window: QMainWindow, catalog: ActionCatalog) -> QToolBar:

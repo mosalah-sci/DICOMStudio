@@ -13,6 +13,7 @@ from dicomviewer.application.discovery import DiscoveryError
 from dicomviewer.application.export import ExportError
 from dicomviewer.domain.export import ExportFormat
 from dicomviewer.domain.measurement import MeasurementKind
+from dicomviewer.domain.settings import MeasurementSettings, ViewingSettings
 from dicomviewer.domain.studies import Image, Patient, Series, Study, StudyTree
 from dicomviewer.presentation.actions.action_ids import ActionId
 from dicomviewer.presentation.windows.main_window import MainWindow
@@ -29,7 +30,7 @@ def _sample_tree() -> StudyTree:
 
 def test_main_window_has_expected_title(make_window: Callable[..., MainWindow]) -> None:
     window = make_window()
-    assert window.windowTitle() == "DICOM Viewer Professional - v0.8.0"
+    assert window.windowTitle() == "DICOM Viewer Professional - v0.9.0"
 
 
 def test_main_window_shows_an_empty_state(make_window: Callable[..., MainWindow]) -> None:
@@ -394,3 +395,110 @@ def test_copy_image_copies_to_the_clipboard(
     window._copy_image()
     assert not qapp.clipboard().image().isNull()
     assert "clipboard" in window.statusBar().currentMessage()
+
+
+def test_viewing_preferences_are_applied_at_startup(
+    make_window: Callable[..., MainWindow],
+) -> None:
+    window = make_window()
+    viewer = window._viewer_panel._viewer
+    assert viewer._max_cache == 3
+    assert viewer._smooth_scaling is True
+    assert viewer._show_statistics_overlay is True
+    assert viewer._show_measurement_overlay is True
+    assert viewer._measurement_color == "#22d3ee"
+
+
+def test_start_scan_records_a_recent_folder(
+    make_window: Callable[..., MainWindow],
+    tmp_path: Path,
+) -> None:
+    window = make_window(study_scanner=FakeStudyScanner(tree=_sample_tree()))
+    folder = tmp_path / "studies"
+    folder.mkdir()
+    window._start_scan(folder)
+    assert window._settings_manager.current_settings.recent.folders[0] == folder
+    assert window._recent_menu is not None
+    assert any(action.text() == str(folder) for action in window._recent_menu.actions())
+
+
+def test_open_recent_folder_starts_a_scan(
+    make_window: Callable[..., MainWindow],
+    qapp: QApplication,
+    tmp_path: Path,
+) -> None:
+    scanner = FakeStudyScanner(tree=_sample_tree())
+    window = make_window(study_scanner=scanner)
+    folder = tmp_path / "studies"
+    folder.mkdir()
+    window._open_recent_folder(folder)
+    assert pump_until(qapp, lambda: scanner.calls == [folder])
+    assert window._settings_manager.current_settings.recent.folders[0] == folder
+
+
+def test_open_recent_folder_drops_a_missing_folder(
+    make_window: Callable[..., MainWindow],
+    tmp_path: Path,
+) -> None:
+    window = make_window()
+    missing = tmp_path / "missing"
+    window._settings_manager.add_recent_folder(missing)
+    window._open_recent_folder(missing)
+    assert window._settings_manager.current_settings.recent.folders == ()
+    assert "no longer exists" in window.statusBar().currentMessage()
+
+
+def test_apply_settings_persists_and_updates_the_viewer(
+    make_window: Callable[..., MainWindow],
+) -> None:
+    window = make_window()
+    viewing = ViewingSettings(
+        default_window_preset="CT Lung",
+        max_cache_size=6,
+        smooth_scaling=False,
+        show_statistics_overlay=False,
+        show_measurement_overlay=True,
+    )
+    window._apply_settings(viewing, MeasurementSettings(color="#ff0000"))
+    viewer = window._viewer_panel._viewer
+    assert viewer._max_cache == 6
+    assert viewer._smooth_scaling is False
+    assert viewer._show_statistics_overlay is False
+    assert viewer._show_measurement_overlay is True
+    assert viewer._measurement_color == "#ff0000"
+    assert window._settings_manager.current_settings.viewing.max_cache_size == 6
+    assert "Settings saved" in window.statusBar().currentMessage()
+
+
+def test_default_window_preset_applies_on_series_load(
+    make_window: Callable[..., MainWindow],
+    qapp: QApplication,
+    tmp_path: Path,
+) -> None:
+    window = make_window(study_scanner=FakeStudyScanner(tree=_sample_tree()))
+    window._apply_settings(ViewingSettings(default_window_preset="CT Lung"), MeasurementSettings())
+    _load_series(window, qapp, tmp_path)
+    viewport = window._viewer_panel._viewer.viewport
+    assert viewport.window_center == -500.0
+    assert viewport.window_width == 1500.0
+
+
+def test_reset_settings_restores_defaults(
+    make_window: Callable[..., MainWindow],
+    tmp_path: Path,
+) -> None:
+    window = make_window()
+    window._apply_settings(
+        ViewingSettings(max_cache_size=9, default_window_preset="CT Lung"),
+        MeasurementSettings(color="#ff0000"),
+    )
+    window._settings_manager.add_recent_folder(tmp_path / "recent")
+    assert window._settings_manager.current_settings.viewing.max_cache_size == 9
+    window._reset_settings()
+    settings = window._settings_manager.current_settings
+    assert settings.viewing.max_cache_size == 3
+    assert settings.viewing.default_window_preset == ""
+    assert settings.measurements.color == "#22d3ee"
+    assert settings.recent.folders == ()
+    assert window._viewer_panel._viewer._max_cache == 3
+    assert window._viewer_panel._viewer._measurement_color == "#22d3ee"

@@ -21,3 +21,7 @@ class SettingsStore(Protocol):
     def save(self, settings: Settings) -> None:
         """Persist the given settings snapshot."""
         raise NotImplementedError
+
+    def reset(self) -> None:
+        """Discard persisted user overrides, returning to defaults."""
+        raise NotImplementedError

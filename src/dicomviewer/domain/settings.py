@@ -7,14 +7,21 @@ TOML persistence details owned by Infrastructure.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+import re
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, cast
 
 from dicomviewer.domain.exceptions import DicomViewerError
+from dicomviewer.domain.image_processing import find_window_preset
 
 VALID_LOG_LEVELS = frozenset({"TRACE", "DEBUG", "INFO", "SUCCESS", "WARNING", "ERROR", "CRITICAL"})
 VALID_THEMES = frozenset({"dark", "light"})
+MAX_RECENT_FOLDERS = 8
+MIN_CACHE_SIZE = 1
+MAX_CACHE_SIZE = 16
+_HEX_COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
 
 
 class SettingsError(DicomViewerError):
@@ -60,11 +67,95 @@ class AppearanceSettings:
 
 
 @dataclass(frozen=True)
+class RecentFoldersSettings:
+    """Recently opened study folders, most recent first."""
+
+    folders: tuple[Path, ...] = ()
+
+    @classmethod
+    def from_mapping(cls, data: Mapping[str, Any]) -> RecentFoldersSettings:
+        """Build settings from a TOML ``[recent]`` mapping."""
+        return cls(folders=_validate_path_list(data.get("folders", ())))
+
+    def to_mapping(self) -> dict[str, list[str]]:
+        """Return the settings as a plain TOML-serializable mapping."""
+        return {"folders": [str(folder) for folder in self.folders]}
+
+    def add(self, folder: Path) -> RecentFoldersSettings:
+        """Return a copy with ``folder`` moved to the front, de-duplicated."""
+        folders = [folder, *(item for item in self.folders if item != folder)]
+        return RecentFoldersSettings(folders=tuple(folders[:MAX_RECENT_FOLDERS]))
+
+    def remove(self, folder: Path) -> RecentFoldersSettings:
+        """Return a copy without ``folder``."""
+        return RecentFoldersSettings(folders=tuple(item for item in self.folders if item != folder))
+
+    def clear(self) -> RecentFoldersSettings:
+        """Return a copy with no recent folders."""
+        return RecentFoldersSettings()
+
+
+@dataclass(frozen=True)
+class ViewingSettings:
+    """Default viewer behaviour applied when a series is displayed."""
+
+    default_window_preset: str = ""
+    max_cache_size: int = 3
+    smooth_scaling: bool = True
+    show_statistics_overlay: bool = True
+    show_measurement_overlay: bool = True
+
+    @classmethod
+    def from_mapping(cls, data: Mapping[str, Any]) -> ViewingSettings:
+        """Build settings from a TOML ``[viewing]`` mapping."""
+        return cls(
+            default_window_preset=_validate_preset(data.get("default_window_preset", "")),
+            max_cache_size=_validate_cache_size(data.get("max_cache_size", 3)),
+            smooth_scaling=_validate_bool("smooth_scaling", data.get("smooth_scaling", True)),
+            show_statistics_overlay=_validate_bool(
+                "show_statistics_overlay", data.get("show_statistics_overlay", True)
+            ),
+            show_measurement_overlay=_validate_bool(
+                "show_measurement_overlay", data.get("show_measurement_overlay", True)
+            ),
+        )
+
+    def to_mapping(self) -> dict[str, Any]:
+        """Return the settings as a plain TOML-serializable mapping."""
+        return {
+            "default_window_preset": self.default_window_preset,
+            "max_cache_size": self.max_cache_size,
+            "smooth_scaling": self.smooth_scaling,
+            "show_statistics_overlay": self.show_statistics_overlay,
+            "show_measurement_overlay": self.show_measurement_overlay,
+        }
+
+
+@dataclass(frozen=True)
+class MeasurementSettings:
+    """Presentation preferences for measurement overlays."""
+
+    color: str = "#22d3ee"
+
+    @classmethod
+    def from_mapping(cls, data: Mapping[str, Any]) -> MeasurementSettings:
+        """Build settings from a TOML ``[measurements]`` mapping."""
+        return cls(color=_validate_color(data.get("color", "#22d3ee")))
+
+    def to_mapping(self) -> dict[str, str]:
+        """Return the settings as a plain TOML-serializable mapping."""
+        return {"color": self.color}
+
+
+@dataclass(frozen=True)
 class Settings:
     """Immutable snapshot of the full application configuration."""
 
     logging: LoggingSettings
     appearance: AppearanceSettings = AppearanceSettings()
+    recent: RecentFoldersSettings = RecentFoldersSettings()
+    viewing: ViewingSettings = ViewingSettings()
+    measurements: MeasurementSettings = MeasurementSettings()
 
     @classmethod
     def from_mapping(cls, data: Mapping[str, Any]) -> Settings:
@@ -81,11 +172,41 @@ class Settings:
             if appearance_data is not None
             else AppearanceSettings()
         )
-        return cls(logging=logging_settings, appearance=appearance_settings)
+        recent_data = as_str_mapping(data.get("recent"))
+        recent_settings = (
+            RecentFoldersSettings.from_mapping(recent_data)
+            if recent_data is not None
+            else RecentFoldersSettings()
+        )
+        viewing_data = as_str_mapping(data.get("viewing"))
+        viewing_settings = (
+            ViewingSettings.from_mapping(viewing_data)
+            if viewing_data is not None
+            else ViewingSettings()
+        )
+        measurements_data = as_str_mapping(data.get("measurements"))
+        measurements_settings = (
+            MeasurementSettings.from_mapping(measurements_data)
+            if measurements_data is not None
+            else MeasurementSettings()
+        )
+        return cls(
+            logging=logging_settings,
+            appearance=appearance_settings,
+            recent=recent_settings,
+            viewing=viewing_settings,
+            measurements=measurements_settings,
+        )
 
     def to_mapping(self) -> dict[str, Any]:
         """Return the full settings as a TOML-serializable mapping."""
-        return {"logging": self.logging.to_mapping(), "appearance": self.appearance.to_mapping()}
+        return {
+            "logging": self.logging.to_mapping(),
+            "appearance": self.appearance.to_mapping(),
+            "recent": self.recent.to_mapping(),
+            "viewing": self.viewing.to_mapping(),
+            "measurements": self.measurements.to_mapping(),
+        }
 
 
 def as_str_mapping(value: Any) -> Mapping[str, Any] | None:
@@ -107,6 +228,52 @@ def _validate_theme(value: Any) -> str:
     if not isinstance(value, str) or value.lower() not in VALID_THEMES:
         raise SettingsError(f"Invalid theme: {value!r}")
     return value.lower()
+
+
+def _validate_preset(value: Any) -> str:
+    """Validate a default window preset name; empty means no preset."""
+    if isinstance(value, str) and value == "":
+        return ""
+    if not isinstance(value, str) or find_window_preset(value) is None:
+        raise SettingsError(f"Invalid window preset: {value!r}")
+    return value
+
+
+def _validate_cache_size(value: Any) -> int:
+    """Validate and normalize the decode cache size."""
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise SettingsError(f"Invalid cache size: {value!r}")
+    if not MIN_CACHE_SIZE <= value <= MAX_CACHE_SIZE:
+        raise SettingsError(f"Cache size out of range: {value!r}")
+    return value
+
+
+def _validate_bool(field: str, value: Any) -> bool:
+    """Reject non-boolean values for boolean settings."""
+    if not isinstance(value, bool):
+        raise SettingsError(f"Invalid value for '{field}': {value!r}")
+    return value
+
+
+def _validate_color(value: Any) -> str:
+    """Validate a #RRGGBB colour string, or reject it."""
+    if not isinstance(value, str) or _HEX_COLOR_RE.match(value) is None:
+        raise SettingsError(f"Invalid measurement colour: {value!r}")
+    return value.lower()
+
+
+def _validate_path_list(value: Any) -> tuple[Path, ...]:
+    """Normalize and validate a list of folder paths."""
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
+        raise SettingsError(f"Invalid recent folders list: {value!r}")
+    folders: list[Path] = []
+    for item in cast(Sequence[Any], value):
+        if not isinstance(item, str) or not item.strip():
+            raise SettingsError(f"Invalid recent folder entry: {item!r}")
+        folder = Path(item)
+        if folder not in folders:
+            folders.append(folder)
+    return tuple(folders[:MAX_RECENT_FOLDERS])
 
 
 def _validate_non_empty(field: str, value: Any) -> str:

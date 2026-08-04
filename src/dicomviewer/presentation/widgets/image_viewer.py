@@ -76,6 +76,10 @@ class ImageViewerWidget(QWidget):
         *,
         analyzer: ImageAnalyzer,
         max_cache: int = _DEFAULT_CACHE_SIZE,
+        smooth_scaling: bool = True,
+        show_statistics_overlay: bool = True,
+        show_measurement_overlay: bool = True,
+        measurement_color: str = "#22d3ee",
     ) -> None:
         """Create a viewer backed by ``decoder``, ``renderer`` and ``analyzer``."""
         super().__init__(parent)
@@ -83,6 +87,10 @@ class ImageViewerWidget(QWidget):
         self._renderer = renderer
         self._analyzer = analyzer
         self._max_cache = max_cache
+        self._smooth_scaling = smooth_scaling
+        self._show_statistics_overlay = show_statistics_overlay
+        self._show_measurement_overlay = show_measurement_overlay
+        self._measurement_color = measurement_color
         self._images: tuple[Image, ...] = ()
         self._cache: dict[int, PixelArray] = {}
         self._slice_analysis: dict[int, tuple[PixelStatistics, Histogram]] = {}
@@ -267,6 +275,31 @@ class ImageViewerWidget(QWidget):
         self.measurements_changed.emit(self._measurements)
         self.update()
 
+    def set_max_cache(self, size: int) -> None:
+        """Set the decode cache size and evict entries beyond it."""
+        self._max_cache = max(size, 1)
+        self._evict_cache()
+
+    def set_smooth_scaling(self, enabled: bool) -> None:
+        """Enable or disable smooth (interpolated) image scaling."""
+        self._smooth_scaling = enabled
+        self.update()
+
+    def set_show_statistics_overlay(self, enabled: bool) -> None:
+        """Show or hide the statistics and histogram overlay."""
+        self._show_statistics_overlay = enabled
+        self.update()
+
+    def set_show_measurement_overlay(self, enabled: bool) -> None:
+        """Show or hide the measurement overlay."""
+        self._show_measurement_overlay = enabled
+        self.update()
+
+    def set_measurement_color(self, color: str) -> None:
+        """Set the colour used to draw measurement overlays."""
+        self._measurement_color = color
+        self.update()
+
     def widget_to_image(self, position: QPointF) -> Point:
         """Map a widget coordinate into image pixel coordinates."""
         image = self._qimage
@@ -426,7 +459,8 @@ class ImageViewerWidget(QWidget):
         painter.fillRect(self.rect(), self.palette().window().color())
         image = self._qimage
         if image is not None and not image.isNull():
-            painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+            if self._smooth_scaling:
+                painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
             painter.drawImage(self._target_rect(image), image)
         if self._last_error:
             self._paint_message(painter, self._last_error)
@@ -599,7 +633,7 @@ class ImageViewerWidget(QWidget):
         painter.drawText(QPointF(12.0, self.height() - 12.0), "   ".join(info))
 
         stats = self.statistics
-        if stats is not None:
+        if self._show_statistics_overlay and stats is not None:
             text = (
                 f"min {stats.minimum:.0f}  max {stats.maximum:.0f}  "
                 f"mean {stats.mean:.1f}  SD {stats.standard_deviation:.1f}"
@@ -610,7 +644,8 @@ class ImageViewerWidget(QWidget):
         if self._measure_tool.is_active():
             painter.setPen(Qt.GlobalColor.yellow)
             painter.drawText(QPointF(12.0, 24.0), "Measuring - click to place points (Esc to stop)")
-        self._paint_measurements(painter)
+        if self._show_measurement_overlay:
+            self._paint_measurements(painter)
         painter.restore()
 
     def _paint_measurements(self, painter: QPainter) -> None:
@@ -631,13 +666,13 @@ class ImageViewerWidget(QWidget):
         """Draw one completed measurement with its handle points and label."""
         points = [self.image_to_widget(point) for point in measurement.points]
         painter.save()
-        painter.setPen(QPen(QColor("#22d3ee"), 1.5))
-        painter.setBrush(QColor("#22d3ee"))
+        painter.setPen(QPen(QColor(self._measurement_color), 1.5))
+        painter.setBrush(QColor(self._measurement_color))
         for point in points:
             painter.drawEllipse(point, 3.0, 3.0)
         label = measurement_label(measurement, pixel_array)
         if measurement.kind is MeasurementKind.DISTANCE:
-            painter.setPen(QPen(QColor("#22d3ee"), 1.5))
+            painter.setPen(QPen(QColor(self._measurement_color), 1.5))
             painter.drawLine(points[0], points[1])
             self._draw_label(painter, label, self._midpoint(points[0], points[1]))
         else:

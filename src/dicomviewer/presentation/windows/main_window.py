@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 
@@ -13,6 +14,7 @@ from PySide6.QtWidgets import (
     QDockWidget,
     QFileDialog,
     QMainWindow,
+    QMenu,
     QWidget,
 )
 
@@ -21,15 +23,25 @@ from dicomviewer.application.export import ExportError, ImageExporter
 from dicomviewer.application.measurement import MeasurementCollection
 from dicomviewer.application.metadata import MetadataService
 from dicomviewer.application.processing import ImageAnalyzer
+from dicomviewer.application.theme_manager import ThemeManager
 from dicomviewer.application.viewing import PixelDecoder, ViewRenderer
 from dicomviewer.application.window_state_store import WindowState, WindowStateStore
 from dicomviewer.domain.export import ExportFormat
-from dicomviewer.domain.image_processing import WINDOW_PRESETS, WindowPreset
+from dicomviewer.domain.image_processing import (
+    WINDOW_PRESETS,
+    WindowPreset,
+    find_window_preset,
+)
 from dicomviewer.domain.measurement import MeasurementKind
+from dicomviewer.domain.settings import MeasurementSettings, Settings, ViewingSettings
 from dicomviewer.domain.studies import Series, StudyTree
 from dicomviewer.presentation.actions.action_catalog import ActionCatalog
 from dicomviewer.presentation.actions.action_ids import ActionId
-from dicomviewer.presentation.actions.assembly import create_toolbar, populate_menu_bar
+from dicomviewer.presentation.actions.assembly import (
+    create_toolbar,
+    populate_menu_bar,
+    populate_recent_folders_menu,
+)
 from dicomviewer.presentation.dialogs.about_dialog import AboutDialog
 from dicomviewer.presentation.dialogs.settings_dialog import SettingsDialog
 from dicomviewer.presentation.feedback.error_presenter import ErrorPresenter
@@ -88,6 +100,7 @@ class MainWindow(QMainWindow):
         app_name: str,
         version: str,
         theme_controller: ThemeController,
+        settings_manager: ThemeManager,
         window_state_store: WindowStateStore,
         icon_provider: IconProvider,
         study_scanner: StudyScanner,
@@ -106,6 +119,7 @@ class MainWindow(QMainWindow):
         self._app_name = app_name
         self._version = version
         self._theme_controller = theme_controller
+        self._settings_manager = settings_manager
         self._window_state_store = window_state_store
         self._icon_provider = icon_provider
         self._study_scanner = study_scanner
@@ -121,6 +135,7 @@ class MainWindow(QMainWindow):
         self._scan_relay: _ScanRelay | None = None
         self._scan_generation = 0
         self._preset_actions: tuple[QAction, ...] = ()
+        self._recent_menu: QMenu | None = None
         self._error_presenter = error_presenter or ErrorPresenter()
 
         self.setWindowTitle(f"{app_name} - v{version}")
@@ -139,6 +154,8 @@ class MainWindow(QMainWindow):
             on_clear_measurements=self._clear_measurements,
         )
         self.addToolBar(create_toolbar(self, self._catalog))
+        self._build_recent_folders_menu()
+        self._apply_viewing_preferences()
 
         self._capture_default_layout()
         self._restore_persisted_layout()
@@ -274,6 +291,8 @@ class MainWindow(QMainWindow):
         """Start a background scan of ``folder``, cancelling any previous one."""
         self._scan_generation += 1
         generation = self._scan_generation
+        self._settings_manager.add_recent_folder(folder)
+        self._refresh_recent_menu()
         self._study_explorer_panel.show_scanning()
         self._metadata_panel.show_initial()
         self._status_bar.showMessage(f"Scanning {folder}…")
@@ -350,6 +369,7 @@ class MainWindow(QMainWindow):
         """Display the activated series in the viewer and metadata panel."""
         self._viewer_panel.load_series(series.images, index)
         self._metadata_panel.show_series(series.images, index)
+        self._apply_default_window_preset()
         self._status_bar.showMessage(
             f"Loaded {series.modality or 'series'} with {series.image_count} images."
         )
@@ -501,13 +521,98 @@ class MainWindow(QMainWindow):
         self._catalog.action(ActionId.TOGGLE_METADATA).setChecked(self._metadata_dock.isVisible())
 
     def _open_settings(self) -> None:
-        """Open the settings dialog with live theme preview."""
+        """Open the settings dialog with live preview and applied preferences."""
+        settings = self._settings_manager.current_settings
         dialog = SettingsDialog(
             self,
-            current_theme=self._theme_controller.current_theme,
+            current_theme=settings.appearance.theme,
+            viewing=settings.viewing,
+            measurements=settings.measurements,
             on_theme_changed=self._change_theme,
+            on_apply=self._apply_settings,
+            on_reset=self._reset_settings,
         )
         dialog.exec()
+
+    def _apply_settings(
+        self,
+        viewing: ViewingSettings,
+        measurements: MeasurementSettings,
+    ) -> None:
+        """Persist the chosen preferences and apply them to the viewer."""
+        updated = replace(
+            self._settings_manager.current_settings,
+            viewing=viewing,
+            measurements=measurements,
+        )
+        self._settings_manager.update(updated)
+        self._apply_viewing_preferences()
+        self._apply_default_window_preset()
+        self._status_bar.showMessage("Settings saved.")
+
+    def _reset_settings(self) -> Settings:
+        """Restore the bundled defaults and refresh the whole application."""
+        settings = self._settings_manager.reset()
+        self._theme_controller.apply_current()
+        self._catalog.refresh_icons()
+        self._status_bar.set_theme(THEMES[settings.appearance.theme].display_name)
+        self._apply_viewing_preferences()
+        self._refresh_recent_menu()
+        return settings
+
+    def _apply_viewing_preferences(self) -> None:
+        """Push the persisted viewing and measurement settings to the viewer."""
+        settings = self._settings_manager.current_settings
+        self._viewer_panel.set_max_cache(settings.viewing.max_cache_size)
+        self._viewer_panel.set_smooth_scaling(settings.viewing.smooth_scaling)
+        self._viewer_panel.set_show_statistics_overlay(settings.viewing.show_statistics_overlay)
+        self._viewer_panel.set_show_measurement_overlay(settings.viewing.show_measurement_overlay)
+        self._viewer_panel.set_measurement_color(settings.measurements.color)
+
+    def _apply_default_window_preset(self) -> None:
+        """Apply the configured default window preset to the current series."""
+        preset_name = self._settings_manager.current_settings.viewing.default_window_preset
+        if not preset_name or not self._viewer_panel.has_image:
+            return
+        preset = find_window_preset(preset_name)
+        if preset is not None:
+            self._viewer_panel.apply_preset(preset)
+
+    def _build_recent_folders_menu(self) -> None:
+        """Insert the Recent Folders submenu into the File menu."""
+        file_menu = next(
+            (menu for menu in self.menuBar().findChildren(QMenu) if menu.title() == "&File"),
+            None,
+        )
+        if file_menu is None:
+            return
+        recent_menu = QMenu("Recent &Folders", file_menu)
+        separators = [action for action in file_menu.actions() if action.isSeparator()]
+        if separators:
+            file_menu.insertMenu(separators[0], recent_menu)
+        else:
+            file_menu.addMenu(recent_menu)
+        self._recent_menu = recent_menu
+        self._refresh_recent_menu()
+
+    def _refresh_recent_menu(self) -> None:
+        """Rebuild the Recent Folders submenu from the persisted settings."""
+        if self._recent_menu is None:
+            return
+        populate_recent_folders_menu(
+            self._recent_menu,
+            self._settings_manager.current_settings.recent.folders,
+            self._open_recent_folder,
+        )
+
+    def _open_recent_folder(self, folder: Path) -> None:
+        """Open a recently used folder, dropping it when it no longer exists."""
+        if not folder.is_dir():
+            self._settings_manager.remove_recent_folder(folder)
+            self._refresh_recent_menu()
+            self._status_bar.showMessage("That folder no longer exists.")
+            return
+        self._start_scan(folder)
 
     def _change_theme(self, theme_name: str) -> None:
         """Switch the theme, refresh icons and update the status bar."""
