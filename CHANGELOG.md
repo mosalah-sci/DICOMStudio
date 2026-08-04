@@ -5,6 +5,31 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.8.0] - 2026-08-04
+
+### Added
+
+- Export System:
+  - PNG and JPEG export of the current viewport through File > Export Image
+    (Ctrl+S) with a format-aware save dialog; JPEG honours a quality setting.
+  - Screenshot capture (Tools > Screenshot) that saves a timestamped PNG to a
+    screenshots folder (Pictures by default) without interrupting the user.
+  - Copy Image to Clipboard (File > Copy Image to Clipboard, Ctrl+C) placing
+    the current view on the system clipboard.
+  - Exported images match the current viewport: the captured view applies the
+    live zoom, pan and window/level transform and includes the statistics,
+    histogram and measurement overlays exactly as configured.
+  - Viewport capture implemented as an RGBA render at widget resolution, so
+    files and the clipboard share one code path and remain consistent.
+  - Image encoding isolated behind an application port (`ImageExporter`) with
+    a Qt-backed implementation in Infrastructure; the rest of the codebase
+    stays free of image codec concerns.
+  - Pure domain `ExportFormat` enumeration (extension and MIME type per
+    format) used by the dialogs, exporter and tests.
+  - Export, screenshot and clipboard actions are enabled only while a series
+    is loaded and report failures through the standard error presenter.
+  - Application version bumped to 0.8.0.
+
 ## [0.7.0] - 2026-08-04
 
 ### Added

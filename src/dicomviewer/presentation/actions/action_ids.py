@@ -18,6 +18,7 @@ class ActionId(StrEnum):
     WINDOW_LEVEL = "window_level"
     MEASURE = "measure"
     CLEAR_MEASUREMENTS = "clear_measurements"
+    COPY_IMAGE = "copy_image"
     SCREENSHOT = "screenshot"
     SETTINGS = "settings"
     TOGGLE_STUDY_EXPLORER = "toggle_study_explorer"

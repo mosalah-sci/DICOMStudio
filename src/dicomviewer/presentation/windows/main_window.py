@@ -2,19 +2,28 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 
 from loguru import logger
-from PySide6.QtCore import QByteArray, QObject, Qt, QThread, Signal, Slot
+from PySide6.QtCore import QByteArray, QObject, QStandardPaths, Qt, QThread, Signal, Slot
 from PySide6.QtGui import QAction, QCloseEvent
-from PySide6.QtWidgets import QDockWidget, QFileDialog, QMainWindow, QWidget
+from PySide6.QtWidgets import (
+    QApplication,
+    QDockWidget,
+    QFileDialog,
+    QMainWindow,
+    QWidget,
+)
 
 from dicomviewer.application.discovery import StudyScanner, ThumbnailService
+from dicomviewer.application.export import ExportError, ImageExporter
 from dicomviewer.application.measurement import MeasurementCollection
 from dicomviewer.application.metadata import MetadataService
 from dicomviewer.application.processing import ImageAnalyzer
 from dicomviewer.application.viewing import PixelDecoder, ViewRenderer
 from dicomviewer.application.window_state_store import WindowState, WindowStateStore
+from dicomviewer.domain.export import ExportFormat
 from dicomviewer.domain.image_processing import WINDOW_PRESETS, WindowPreset
 from dicomviewer.domain.measurement import MeasurementKind
 from dicomviewer.domain.studies import Series, StudyTree
@@ -24,6 +33,7 @@ from dicomviewer.presentation.actions.assembly import create_toolbar, populate_m
 from dicomviewer.presentation.dialogs.about_dialog import AboutDialog
 from dicomviewer.presentation.dialogs.settings_dialog import SettingsDialog
 from dicomviewer.presentation.feedback.error_presenter import ErrorPresenter
+from dicomviewer.presentation.imaging.rendered_image import to_qimage
 from dicomviewer.presentation.theme.icon_provider import IconProvider
 from dicomviewer.presentation.theme.theme_controller import ThemeController
 from dicomviewer.presentation.theme.themes import THEMES
@@ -86,6 +96,8 @@ class MainWindow(QMainWindow):
         view_renderer: ViewRenderer,
         image_analyzer: ImageAnalyzer,
         metadata_service: MetadataService,
+        image_exporter: ImageExporter,
+        screenshot_dir: Path | None = None,
         error_presenter: ErrorPresenter | None = None,
         parent: QWidget | None = None,
     ) -> None:
@@ -102,6 +114,8 @@ class MainWindow(QMainWindow):
         self._view_renderer = view_renderer
         self._image_analyzer = image_analyzer
         self._metadata_service = metadata_service
+        self._image_exporter = image_exporter
+        self._screenshot_dir = screenshot_dir
         self._scan_thread: QThread | None = None
         self._scan_worker: StudyScanWorker | None = None
         self._scan_relay: _ScanRelay | None = None
@@ -164,6 +178,9 @@ class MainWindow(QMainWindow):
                 ActionId.WINDOW_LEVEL: self._viewer_panel.reset_window_level,
                 ActionId.MEASURE: self._toggle_measure,
                 ActionId.CLEAR_MEASUREMENTS: self._clear_measurements,
+                ActionId.EXPORT_IMAGE: self._export_image,
+                ActionId.SCREENSHOT: self._capture_screenshot,
+                ActionId.COPY_IMAGE: self._copy_image,
             },
         )
 
@@ -356,6 +373,9 @@ class MainWindow(QMainWindow):
             ActionId.RESET_VIEW,
             ActionId.WINDOW_LEVEL,
             ActionId.MEASURE,
+            ActionId.EXPORT_IMAGE,
+            ActionId.SCREENSHOT,
+            ActionId.COPY_IMAGE,
         ):
             self._catalog.action(action_id).setEnabled(has_image)
         for action in self._preset_actions:
@@ -380,6 +400,72 @@ class MainWindow(QMainWindow):
         """Remove every measurement and report it in the status bar."""
         self._viewer_panel.clear_measurements()
         self._status_bar.showMessage("Cleared all measurements.")
+
+    def _export_image(self) -> None:
+        """Prompt for a PNG or JPEG destination and export the current view."""
+        if not self._viewer_panel.has_image:
+            return
+        default_name = f"dicomviewer_export_{_timestamp()}.png"
+        path, selected_filter = QFileDialog.getSaveFileName(
+            self,
+            "Export Image",
+            default_name,
+            "PNG Image (*.png);;JPEG Image (*.jpg *.jpeg)",
+        )
+        if not path:
+            return
+        export_format = _export_format_for(Path(path), selected_filter)
+        if export_format is None:
+            self._status_bar.showMessage("Unsupported export format.")
+            return
+        self._save_export(Path(path), export_format)
+
+    def _save_export(self, path: Path, export_format: ExportFormat) -> None:
+        """Capture the current view and write it to ``path`` in ``export_format``."""
+        try:
+            capture = self._viewer_panel.capture_view()
+            self._image_exporter.write(capture, export_format, path)
+        except (ExportError, ValueError, OSError) as exc:
+            self._error_presenter.show_error(
+                self,
+                "Export Failed",
+                "The current view could not be exported.",
+                detail=str(exc),
+            )
+            return
+        self._status_bar.showMessage(f"Exported {export_format.value.upper()} to {path}")
+
+    def _capture_screenshot(self) -> None:
+        """Save a timestamped PNG screenshot of the current view."""
+        directory = self._screenshot_dir or _default_screenshot_dir()
+        try:
+            directory.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            self._error_presenter.show_error(
+                self,
+                "Screenshot Failed",
+                "The screenshots folder could not be created.",
+                detail=str(exc),
+            )
+            return
+        self._save_export(directory / f"dicomviewer_{_timestamp()}.png", ExportFormat.PNG)
+
+    def _copy_image(self) -> None:
+        """Copy the current view to the system clipboard."""
+        if not self._viewer_panel.has_image:
+            return
+        try:
+            capture = self._viewer_panel.capture_view()
+        except ValueError as exc:
+            self._error_presenter.show_error(
+                self,
+                "Copy Failed",
+                "The current view could not be captured.",
+                detail=str(exc),
+            )
+            return
+        QApplication.clipboard().setImage(to_qimage(capture))
+        self._status_bar.showMessage("Copied the current view to the clipboard.")
 
     def _on_measurements_changed(self, measurements: MeasurementCollection) -> None:
         """Enable Clear Measurements only while measurements exist."""
@@ -466,3 +552,25 @@ class MainWindow(QMainWindow):
             Qt.Orientation.Horizontal,
         )
         self._sync_dock_toggles()
+
+
+def _export_format_for(path: Path, selected_filter: str) -> ExportFormat | None:
+    """Return the export format implied by ``path`` or the selected filter."""
+    suffix = path.suffix.lower()
+    if suffix in (".jpg", ".jpeg") or "JPEG" in selected_filter:
+        return ExportFormat.JPEG
+    if suffix == ".png" or "PNG" in selected_filter:
+        return ExportFormat.PNG
+    return None
+
+
+def _timestamp() -> str:
+    """Return a compact, sortable timestamp for default file names."""
+    return datetime.now().strftime("%Y%m%d_%H%M%S")
+
+
+def _default_screenshot_dir() -> Path:
+    """Return the folder where screenshots are saved by default."""
+    location = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.PicturesLocation)
+    base = Path(location) if location else Path.home()
+    return base / "dicomviewer-screenshots"

@@ -10,11 +10,13 @@ from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QDockWidget, QLabel, QWidget
 
 from dicomviewer.application.discovery import DiscoveryError
+from dicomviewer.application.export import ExportError
+from dicomviewer.domain.export import ExportFormat
 from dicomviewer.domain.measurement import MeasurementKind
 from dicomviewer.domain.studies import Image, Patient, Series, Study, StudyTree
 from dicomviewer.presentation.actions.action_ids import ActionId
 from dicomviewer.presentation.windows.main_window import MainWindow
-from tests.dicom_utils import FakeStudyScanner
+from tests.dicom_utils import FakeImageExporter, FakeStudyScanner
 from tests.qt_utils import pump_until
 
 
@@ -27,7 +29,7 @@ def _sample_tree() -> StudyTree:
 
 def test_main_window_has_expected_title(make_window: Callable[..., MainWindow]) -> None:
     window = make_window()
-    assert window.windowTitle() == "DICOM Viewer Professional - v0.7.0"
+    assert window.windowTitle() == "DICOM Viewer Professional - v0.8.0"
 
 
 def test_main_window_shows_an_empty_state(make_window: Callable[..., MainWindow]) -> None:
@@ -163,6 +165,9 @@ def test_viewer_actions_are_disabled_without_content(
     window = make_window()
     assert not window.action(ActionId.ZOOM_IN).isEnabled()
     assert not window.action(ActionId.RESET_VIEW).isEnabled()
+    assert not window.action(ActionId.EXPORT_IMAGE).isEnabled()
+    assert not window.action(ActionId.SCREENSHOT).isEnabled()
+    assert not window.action(ActionId.COPY_IMAGE).isEnabled()
     assert all(not action.isEnabled() for action in window._preset_actions)
 
 
@@ -294,3 +299,98 @@ def test_measurement_flow_enables_and_clears(
 
     measure.trigger()
     assert window._viewer_panel.measure_mode is None
+
+
+def _load_series(
+    window: MainWindow,
+    qapp: QApplication,
+    tmp_path: Path,
+) -> None:
+    """Start a scan and activate the first series, mirroring existing tests."""
+    folder = tmp_path / "studies"
+    folder.mkdir()
+    window._start_scan(folder)
+    explorer = window._study_explorer_panel
+    assert pump_until(qapp, lambda: explorer._stack.currentIndex() == 3)
+    series_item = explorer._tree.topLevelItem(0).child(0).child(0)
+    explorer._tree.itemActivated.emit(series_item, 0)
+    assert window._viewer_panel.has_image
+
+
+def test_export_actions_enabled_after_loading(
+    make_window: Callable[..., MainWindow],
+    qapp: QApplication,
+    tmp_path: Path,
+) -> None:
+    window = make_window(study_scanner=FakeStudyScanner(tree=_sample_tree()))
+    _load_series(window, qapp, tmp_path)
+    assert window.action(ActionId.EXPORT_IMAGE).isEnabled()
+    assert window.action(ActionId.SCREENSHOT).isEnabled()
+    assert window.action(ActionId.COPY_IMAGE).isEnabled()
+
+
+def test_save_export_writes_a_file_and_reports(
+    make_window: Callable[..., MainWindow],
+    qapp: QApplication,
+    tmp_path: Path,
+) -> None:
+    exporter = FakeImageExporter()
+    window = make_window(
+        study_scanner=FakeStudyScanner(tree=_sample_tree()),
+        image_exporter=exporter,
+    )
+    _load_series(window, qapp, tmp_path)
+    target = tmp_path / "export.png"
+    window._save_export(target, ExportFormat.PNG)
+    assert exporter.writes
+    assert exporter.writes[0][1] is ExportFormat.PNG
+    assert target.exists()
+    assert "Exported PNG to" in window.statusBar().currentMessage()
+
+
+def test_save_export_reports_errors(
+    make_window: Callable[..., MainWindow],
+    qapp: QApplication,
+    tmp_path: Path,
+) -> None:
+    exporter = FakeImageExporter(error=ExportError("disk full"))
+    window = make_window(
+        study_scanner=FakeStudyScanner(tree=_sample_tree()),
+        image_exporter=exporter,
+    )
+    _load_series(window, qapp, tmp_path)
+    window._save_export(tmp_path / "export.png", ExportFormat.PNG)
+    assert window._error_presenter.errors
+    assert "Export Failed" in window._error_presenter.errors[0][0]
+
+
+def test_screenshot_saves_to_the_screenshot_dir(
+    make_window: Callable[..., MainWindow],
+    qapp: QApplication,
+    tmp_path: Path,
+) -> None:
+    screenshots = tmp_path / "shots"
+    exporter = FakeImageExporter()
+    window = make_window(
+        study_scanner=FakeStudyScanner(tree=_sample_tree()),
+        image_exporter=exporter,
+        screenshot_dir=screenshots,
+    )
+    _load_series(window, qapp, tmp_path)
+    window._capture_screenshot()
+    files = list(screenshots.glob("dicomviewer_*.png"))
+    assert len(files) == 1
+    assert files[0].exists()
+
+
+def test_copy_image_copies_to_the_clipboard(
+    make_window: Callable[..., MainWindow],
+    qapp: QApplication,
+    tmp_path: Path,
+) -> None:
+    window = make_window(study_scanner=FakeStudyScanner(tree=_sample_tree()))
+    _load_series(window, qapp, tmp_path)
+    qapp.clipboard().clear()
+    window._copy_image()
+    assert not qapp.clipboard().image().isNull()
+    assert "clipboard" in window.statusBar().currentMessage()

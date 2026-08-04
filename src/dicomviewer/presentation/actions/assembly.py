@@ -31,6 +31,7 @@ def populate_menu_bar(
     _add(file_menu, catalog, ActionId.OPEN_FILES)
     file_menu.addSeparator()
     _add(file_menu, catalog, ActionId.EXPORT_IMAGE)
+    _add(file_menu, catalog, ActionId.COPY_IMAGE)
     file_menu.addSeparator()
     _add(file_menu, catalog, ActionId.SETTINGS)
     file_menu.addSeparator()

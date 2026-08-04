@@ -26,6 +26,9 @@ _ENABLED_IDS = (
     ActionId.RESET_VIEW,
     ActionId.WINDOW_LEVEL,
     ActionId.MEASURE,
+    ActionId.COPY_IMAGE,
+    ActionId.EXPORT_IMAGE,
+    ActionId.SCREENSHOT,
 )
 
 

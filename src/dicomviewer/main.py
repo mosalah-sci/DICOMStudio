@@ -25,6 +25,7 @@ from dicomviewer.infrastructure.dicom.metadata_reader import PydicomMetadataServ
 from dicomviewer.infrastructure.dicom.pixel_reader import PydicomPixelDecoder
 from dicomviewer.infrastructure.dicom.scanner import PydicomStudyScanner
 from dicomviewer.infrastructure.dicom.thumbnail_service import PydicomThumbnailService
+from dicomviewer.infrastructure.imaging.qt_exporter import QtImageExporter
 from dicomviewer.infrastructure.logging.setup import configure_logging
 from dicomviewer.infrastructure.persistence.app_paths import AppPaths
 from dicomviewer.infrastructure.persistence.window_state_store import JsonWindowStateStore
@@ -93,6 +94,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         view_renderer=NumpyViewRenderer(processing_pipeline=ProcessingPipeline(())),
         image_analyzer=NumpyImageAnalyzer(),
         metadata_service=PydicomMetadataService(),
+        image_exporter=QtImageExporter(),
     )
     theme_controller.apply_current()
     window.show()

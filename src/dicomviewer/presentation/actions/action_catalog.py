@@ -46,8 +46,7 @@ _SPECS: tuple[ActionSpec, ...] = (
         "&Export Image...",
         icon="save",
         shortcut="Ctrl+S",
-        status_tip="Export the current image",
-        enabled=False,
+        status_tip="Export the current view as a PNG or JPEG image",
     ),
     ActionSpec(
         ActionId.FIT_TO_WINDOW,
@@ -97,11 +96,17 @@ _SPECS: tuple[ActionSpec, ...] = (
         enabled=False,
     ),
     ActionSpec(
+        ActionId.COPY_IMAGE,
+        "&Copy Image to Clipboard",
+        icon="copy",
+        shortcut="Ctrl+C",
+        status_tip="Copy the current view to the clipboard",
+    ),
+    ActionSpec(
         ActionId.SCREENSHOT,
         "&Screenshot",
         icon="camera",
-        status_tip="Capture the viewer",
-        enabled=False,
+        status_tip="Save a PNG screenshot of the current view",
     ),
     ActionSpec(
         ActionId.SETTINGS,

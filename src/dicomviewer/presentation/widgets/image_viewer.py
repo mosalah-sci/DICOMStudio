@@ -38,7 +38,10 @@ from dicomviewer.domain.image_processing import WindowPreset
 from dicomviewer.domain.measurement import Measurement, MeasurementKind, Point
 from dicomviewer.domain.studies import Image
 from dicomviewer.domain.viewport import FitMode, Viewport, clamp_slice
-from dicomviewer.presentation.imaging.rendered_image import to_qimage
+from dicomviewer.presentation.imaging.rendered_image import (
+    rendered_image_from_qimage,
+    to_qimage,
+)
 from dicomviewer.presentation.widgets.measurement_tool import MeasurementTool
 
 _DRAG_NONE = 0
@@ -291,6 +294,23 @@ class ImageViewerWidget(QWidget):
             rect.left() + point.x / image.width() * rect.width(),
             rect.top() + point.y / image.height() * rect.height(),
         )
+
+    def capture_view(self) -> RenderedImage:
+        """Return the current viewport (frame plus overlays) as a rendered frame.
+
+        The capture matches what is displayed: the frame is painted with the
+        current zoom, pan and window/level transform and the statistics,
+        histogram and measurement overlays are included. The payload uses the
+        ARGB32 byte order of the display pipeline so it can be exported or
+        placed on the clipboard without a channel swap. Raises
+        :class:`ValueError` when no series is loaded.
+        """
+        if not self.has_image:
+            raise ValueError("No image is loaded to capture")
+        image = QImage(self.size(), QImage.Format.Format_ARGB32)
+        image.fill(self.palette().window().color())
+        self.render(image)
+        return rendered_image_from_qimage(image)
 
     @property
     def statistics(self) -> PixelStatistics | None:

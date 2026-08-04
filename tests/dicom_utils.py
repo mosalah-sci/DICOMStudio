@@ -10,6 +10,7 @@ from pydicom.uid import ExplicitVRLittleEndian
 
 from dicomviewer.application.processing import Histogram, PixelStatistics
 from dicomviewer.application.viewing import PixelArray, RenderedImage
+from dicomviewer.domain.export import ExportFormat
 from dicomviewer.domain.metadata import MetadataDocument, MetadataElement, MetadataGroup
 from dicomviewer.domain.studies import Image, StudyTree
 from dicomviewer.domain.thumbnail import Thumbnail
@@ -113,6 +114,38 @@ class FakeViewRenderer:
             center = viewport.window_center if viewport.window_center is not None else 0.0
             return (center, viewport.window_width)
         return (50.0, 100.0)
+
+
+class FakeImageExporter:
+    """ImageExporter double that records encodes and writes real files."""
+
+    def __init__(self, error: Exception | None = None) -> None:
+        self.error = error
+        self.writes: list[tuple[RenderedImage, ExportFormat, Path, int]] = []
+        self.encodes: list[tuple[RenderedImage, ExportFormat, int]] = []
+
+    def encode(
+        self,
+        image: RenderedImage,
+        format: ExportFormat,
+        quality: int = 90,
+    ) -> bytes:
+        if self.error is not None:
+            raise self.error
+        self.encodes.append((image, format, quality))
+        return b"encoded"
+
+    def write(
+        self,
+        image: RenderedImage,
+        format: ExportFormat,
+        path: Path,
+        quality: int = 90,
+    ) -> None:
+        if self.error is not None:
+            raise self.error
+        self.writes.append((image, format, Path(path), quality))
+        Path(path).write_bytes(b"encoded")
 
 
 class FakeImageAnalyzer:

@@ -9,7 +9,7 @@ from PySide6.QtWidgets import QStackedWidget, QVBoxLayout, QWidget
 
 from dicomviewer.application.measurement import MeasurementCollection
 from dicomviewer.application.processing import Histogram, ImageAnalyzer, PixelStatistics
-from dicomviewer.application.viewing import PixelDecoder, ViewRenderer
+from dicomviewer.application.viewing import PixelDecoder, RenderedImage, ViewRenderer
 from dicomviewer.domain.image_processing import WindowPreset
 from dicomviewer.domain.measurement import Measurement, MeasurementKind
 from dicomviewer.domain.studies import Image
@@ -168,3 +168,7 @@ class ViewerPanel(QWidget):
     def clear_measurements(self) -> None:
         """Remove every measurement from every slice."""
         self._viewer.clear_measurements()
+
+    def capture_view(self) -> RenderedImage:
+        """Return the current viewport (frame plus overlays) as RGBA bytes."""
+        return self._viewer.capture_view()
