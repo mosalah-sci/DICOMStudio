@@ -437,6 +437,29 @@ def test_open_recent_folder_starts_a_scan(
     assert window._settings_manager.current_settings.recent.folders[0] == folder
 
 
+def test_scan_thread_is_released_after_finishing_without_error(
+    make_window: Callable[..., MainWindow],
+    qapp: QApplication,
+    tmp_path: Path,
+) -> None:
+    scanner = FakeStudyScanner(tree=_sample_tree())
+    window = make_window(study_scanner=scanner)
+    folder = tmp_path / "studies"
+    folder.mkdir()
+
+    # Rapid consecutive scans exercise the thread-finished teardown path and
+    # confirm no RuntimeError from dereferencing a deleted QThread.
+    for _ in range(2):
+        window._start_scan(folder)
+        assert pump_until(
+            qapp, lambda: window._scan_thread is None or not window._scan_thread.isRunning()
+        )
+        assert pump_until(qapp, lambda: window._scan_thread is None)
+
+    assert window._scan_worker is None
+    assert window._scan_relay is None
+
+
 def test_open_recent_folder_drops_a_missing_folder(
     make_window: Callable[..., MainWindow],
     tmp_path: Path,

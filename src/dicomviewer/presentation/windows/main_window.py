@@ -324,7 +324,6 @@ class MainWindow(QMainWindow):
         worker.failed.connect(thread.quit)
         relay.finished.connect(self._on_scan_finished)
         relay.failed.connect(self._on_scan_failed)
-        thread.finished.connect(thread.deleteLater)
         thread.finished.connect(self._on_scan_thread_finished)
         self._scan_worker = worker
         self._scan_thread = thread
@@ -332,14 +331,26 @@ class MainWindow(QMainWindow):
         thread.start()
 
     def _on_scan_thread_finished(self) -> None:
-        """Release the finished scan thread reference.
+        """Release the finished scan thread and its worker objects.
 
-        Keeping the object alive in Python after Qt's deferred deletion has
-        run can make garbage collection double-delete it and crash.
+        ``QThread.finished`` is emitted once the thread's event loop has
+        stopped, so the thread is guaranteed not running here. All references
+        are dropped *before* ``deleteLater()`` is scheduled; once the deferred
+        deletion runs, nothing in this window points at the QThread again,
+        so a deleted C++ object is never dereferenced.
+
+        The sender is used instead of ``self._scan_thread`` so an older thread
+        that finishes after a newer scan has started never deletes (or clears
+        the references of) the current scan.
         """
-        thread = self._scan_thread
-        if thread is not None and not thread.isRunning():
+        thread = self.sender()
+        if not isinstance(thread, QThread):
+            return
+        if self._scan_thread is thread:
             self._scan_thread = None
+            self._scan_worker = None
+            self._scan_relay = None
+        thread.deleteLater()
 
     def _on_scan_finished(self, generation: int, folder: Path, tree: StudyTree) -> None:
         """Populate the study explorer and report the scan outcome."""

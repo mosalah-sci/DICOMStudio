@@ -53,6 +53,13 @@ this project adheres to [Semantic Versioning](https://semver.org/).
   unexpected exception through `failed` signal (and logs it) instead of
   allowing the worker thread to die silently, which was invisible in windowed
   builds.
+- The scan thread is no longer self-deleted while its `finished` handler still
+  runs. `thread.finished.connect(thread.deleteLater)` was raced by the queued
+  cleanup slot, which dereferenced an already-deleted `QThread` and raised
+  `RuntimeError: Internal C++ object already deleted`, leaving the freshly
+  populated study explorer unrendered. The thread is now released by a single
+  teardown slot that clears the window's references before scheduling
+  `deleteLater()`.
 
 ## [0.11.0] - 2026-08-04
 
