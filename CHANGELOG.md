@@ -41,6 +41,19 @@ this project adheres to [Semantic Versioning](https://semver.org/).
     silently returning wrong values.
 - Application version bumped to 1.0.0.
 
+### Fixed
+
+- Logging no longer crashes on startup in frozen windowed builds. PyInstaller
+  builds with a hidden console set `sys.stderr`/`sys.stdout` to `None`, which
+  previously caused `TypeError: Cannot log to objects of type 'NoneType'` when
+  the app was launched from the installer. Console sinks are now attached only
+  when a console stream is available, and `log_dir` guards handle a missing
+  directory.
+- Scan failures are never silent: the background scan worker now reports any
+  unexpected exception through `failed` signal (and logs it) instead of
+  allowing the worker thread to die silently, which was invisible in windowed
+  builds.
+
 ## [0.11.0] - 2026-08-04
 
 ### Added

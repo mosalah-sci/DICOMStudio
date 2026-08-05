@@ -41,3 +41,16 @@ def test_worker_emits_failed_for_os_errors(qapp) -> None:
     worker.failed.connect(failed.append)
     worker.run()
     assert len(failed) == 1
+
+
+def test_worker_reports_unexpected_errors_instead_of_silently_dying(qapp) -> None:
+    scanner = FakeStudyScanner(error=RuntimeError("boom"))
+    worker = StudyScanWorker(scanner, Path("studies"))
+    finished: list = []
+    failed: list = []
+    worker.finished.connect(finished.append)
+    worker.failed.connect(failed.append)
+    worker.run()
+    assert len(finished) == 0
+    assert len(failed) == 1
+    assert "Scan error" in failed[0]

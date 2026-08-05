@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from loguru import logger
 from PySide6.QtCore import QObject, Signal, Slot
 
 from dicomviewer.application.discovery import DiscoveryError, StudyScanner
@@ -36,5 +37,9 @@ class StudyScanWorker(QObject):
             return
         except OSError as exc:
             self.failed.emit(str(exc))
+            return
+        except Exception as exc:  # never let a scan die silently
+            logger.exception("Unexpected scan error for {}", self._folder)
+            self.failed.emit(f"Scan error: {exc}")
             return
         self.finished.emit(tree)
