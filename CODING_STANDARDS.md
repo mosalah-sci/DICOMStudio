@@ -1,6 +1,6 @@
 CODING STANDARDS
 
-Project: DICOM Viewer Professional
+Project: DICOMStudio
 
 Version: 1.0
 
@@ -8,7 +8,7 @@ Status: Approved
 
 1. Purpose
 
-This document defines the mandatory coding standards for the DICOM Viewer Professional project.
+This document defines the mandatory coding standards for the DICOMStudio project.
 
 Every source file, class, function, and module must comply with these standards.
 

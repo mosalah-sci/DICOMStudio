@@ -4,7 +4,7 @@ Purpose
 
 
 
-This document defines the standard prompt structure used for every development milestone in the DICOM Viewer Professional project.
+This document defines the standard prompt structure used for every development milestone in the DICOMStudio project.
 
 
 
@@ -36,7 +36,7 @@ Example:
 
 
 
-You are contributing to the DICOM Viewer Professional project.
+You are contributing to the DICOMStudio project.
 
 
 
@@ -230,7 +230,7 @@ Reference the existing project standards instead of rewriting them.
 
 Example Prompt
 
-You are contributing to the DICOM Viewer Professional project.
+You are contributing to the DICOMStudio project.
 
 
 

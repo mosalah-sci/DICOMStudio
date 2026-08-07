@@ -267,12 +267,19 @@ class MainWindow(QMainWindow):
         self._default_dock_state = self.saveState(_STATE_VERSION)
 
     def _restore_persisted_layout(self) -> None:
-        """Apply the saved geometry and dock layout, when one exists."""
+        """Apply the saved geometry and dock layout, when one exists.
+
+        A layout that cannot be applied (incompatible or damaged) is replaced
+        with the default layout so both side panels stay visible and a loaded
+        study can never be rendered inaccessible by a broken save.
+        """
         state = self._window_state_store.load()
         if state is None:
             return
         self.restoreGeometry(QByteArray(state.geometry))
-        self.restoreState(QByteArray(state.dock_state), _STATE_VERSION)
+        if not self.restoreState(QByteArray(state.dock_state), _STATE_VERSION):
+            logger.warning("Ignoring incompatible dock layout; using the default layout.")
+            self._restore_default_layout()
 
     def _save_window_state(self) -> None:
         """Serialize geometry and dock layout to the window state store."""
@@ -353,13 +360,20 @@ class MainWindow(QMainWindow):
         thread.deleteLater()
 
     def _on_scan_finished(self, generation: int, folder: Path, tree: StudyTree) -> None:
-        """Populate the study explorer and report the scan outcome."""
+        """Populate the study explorer and report the scan outcome.
+
+        A restored layout may hide the study explorer; once a scan actually
+        loads studies the explorer is always brought back so the loaded data
+        can be browsed and selected.
+        """
         if generation != self._scan_generation:
             return
         self._study_explorer_panel.set_study_tree(tree)
         if not tree.has_content():
             self._status_bar.showMessage("No DICOM studies found.")
             return
+        if not self._study_explorer_dock.isVisible():
+            self._study_explorer_dock.setVisible(True)
         message = (
             f"Loaded {tree.patient_count} patients, {tree.study_count} studies, "
             f"{tree.series_count} series."
@@ -449,7 +463,7 @@ class MainWindow(QMainWindow):
         """Prompt for a PNG or JPEG destination and export the current view."""
         if not self._viewer_panel.has_image:
             return
-        default_name = f"dicomviewer_export_{_timestamp()}.png"
+        default_name = f"DICOMStudio_export_{_timestamp()}.png"
         path, selected_filter = QFileDialog.getSaveFileName(
             self,
             "Export Image",
@@ -492,7 +506,7 @@ class MainWindow(QMainWindow):
                 detail=str(exc),
             )
             return
-        self._save_export(directory / f"dicomviewer_{_timestamp()}.png", ExportFormat.PNG)
+        self._save_export(directory / f"DICOMStudio_{_timestamp()}.png", ExportFormat.PNG)
 
     def _copy_image(self) -> None:
         """Copy the current view to the system clipboard."""

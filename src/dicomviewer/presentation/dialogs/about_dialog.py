@@ -15,11 +15,13 @@ from dicomviewer.presentation.theme.icon_provider import IconProvider
 from dicomviewer.shared.constants import (
     APP_COPYRIGHT,
     APP_DESCRIPTION,
-    EMPTY_STATE_ICON_SIZE,
+    APP_SUBTITLE,
     LICENSE_NAME,
     PADDING_8,
     PADDING_16,
 )
+
+_BRAND_ICON_SIZE = 96
 
 
 class AboutDialog(QDialog):
@@ -44,9 +46,7 @@ class AboutDialog(QDialog):
 
         icon_label = QLabel(self)
         icon_label.setPixmap(
-            icon_provider.icon("activity", EMPTY_STATE_ICON_SIZE).pixmap(
-                EMPTY_STATE_ICON_SIZE, EMPTY_STATE_ICON_SIZE
-            )
+            icon_provider.icon("brand", _BRAND_ICON_SIZE).pixmap(_BRAND_ICON_SIZE, _BRAND_ICON_SIZE)
         )
         icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(icon_label)
@@ -55,6 +55,11 @@ class AboutDialog(QDialog):
         name_label.setObjectName("emptyStateTitle")
         name_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(name_label)
+
+        subtitle_label = QLabel(APP_SUBTITLE, self)
+        subtitle_label.setObjectName("emptyStateBody")
+        subtitle_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(subtitle_label)
 
         version_label = QLabel(f"Version {version}", self)
         version_label.setObjectName("emptyStateBody")

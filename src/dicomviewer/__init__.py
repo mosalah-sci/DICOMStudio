@@ -1,6 +1,7 @@
-"""DICOM Viewer Professional.
+"""DICOMStudio.
 
-A professional-grade DICOM medical image viewer for Microsoft Windows.
+A modern, lightweight and professional desktop DICOM viewer built with
+Python and PySide6.
 """
 
 from dicomviewer._version import __version__

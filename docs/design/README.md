@@ -1,6 +1,6 @@
 # Design Documentation
 
-UI/UX design material for the DICOM Viewer Professional interface is
+UI/UX design material for the DICOMStudio interface is
 collected in this directory: mockups, interaction specifications, and notes
 derived from `UI_BLUEPRINT.md`.
 

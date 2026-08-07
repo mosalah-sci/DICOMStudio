@@ -56,9 +56,9 @@ def build_version_info(version: str, output: Path) -> None:
         [StringStruct('CompanyName', '{ORGANIZATION_NAME}'),
          StringStruct('FileDescription', '{APP_DESCRIPTION}'),
          StringStruct('FileVersion', '{version}'),
-         StringStruct('InternalName', 'DicomViewer'),
+         StringStruct('InternalName', 'DICOMStudio'),
          StringStruct('LegalCopyright', '{APP_COPYRIGHT}'),
-         StringStruct('OriginalFilename', 'DicomViewer.exe'),
+         StringStruct('OriginalFilename', 'DICOMStudio.exe'),
          StringStruct('ProductName', '{APP_NAME}'),
          StringStruct('ProductVersion', '{version}')])
     ]),

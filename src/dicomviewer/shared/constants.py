@@ -5,11 +5,14 @@ from types import MappingProxyType
 
 from dicomviewer._version import __version__
 
-APP_NAME = "DICOM Viewer Professional"
+APP_NAME = "DICOMStudio"
+# The user-data directory keeps the original name so existing settings and
+# recent folders survive the rebranding (no behavior or data migration).
 APP_DIR_NAME = "DicomViewer"
-ORGANIZATION_NAME = "DicomViewer"
-APP_DESCRIPTION = "A professional-grade DICOM medical image viewer for Windows."
-APP_COPYRIGHT = "Copyright © 2026 DICOM Viewer Professional Team"
+ORGANIZATION_NAME = "DICOMStudio"
+APP_SUBTITLE = "Modern Open-Source DICOM Workstation"
+APP_DESCRIPTION = "A modern, lightweight desktop DICOM viewer built with Python and PySide6."
+APP_COPYRIGHT = "Copyright © 2026 DICOMStudio Team"
 LICENSE_NAME = "MIT License"
 
 # The UI uses an 8-pixel spacing grid; these are the canonical spacing values.
@@ -32,6 +35,7 @@ __all__ = [
     "APP_DESCRIPTION",
     "APP_DIR_NAME",
     "APP_NAME",
+    "APP_SUBTITLE",
     "EMPTY_STATE_ICON_SIZE",
     "LICENSE_NAME",
     "ORGANIZATION_NAME",

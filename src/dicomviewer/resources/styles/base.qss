@@ -1,6 +1,7 @@
-/* DICOM Viewer Professional - base stylesheet.
+/* DICOMStudio - base stylesheet.
    Tokens are substituted at runtime from the active theme definition using the
-   @token@ syntax. Keep values in sync with the palette in themes.py. */
+   @token@ syntax. Keep values in sync with the palette in themes.py.
+   Brand accent: #00BCD4 (cyan) on the deep-teal #0E4D6E app icon. */
 
 QMainWindow, QDialog {
     background-color: @window@;

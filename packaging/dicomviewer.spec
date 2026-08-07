@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""PyInstaller spec for the DICOM Viewer Professional Windows build.
+"""PyInstaller spec for the DICOMStudio Windows build.
 
 Produces an onedir distribution (folder + launcher executable) that runs
 without a Python installation. The same folder is the standalone application
@@ -16,7 +16,7 @@ from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 _REPO_ROOT = Path(SPECPATH).resolve().parent  # type: ignore[name-defined]
 _SOURCE_DIR = _REPO_ROOT / "src"
 _VERSION_FILE = _REPO_ROOT / "packaging" / "version_info.txt"
-_ICON = _REPO_ROOT / "packaging" / "DicomViewer.ico"
+_ICON = _REPO_ROOT / "packaging" / "DICOMStudio.ico"
 
 datas = collect_data_files("dicomviewer")
 
@@ -48,7 +48,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name="DicomViewer",
+    name="DICOMStudio",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -70,5 +70,5 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name="DicomViewer",
+    name="DICOMStudio",
 )

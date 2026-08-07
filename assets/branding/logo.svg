@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 340" width="1200" height="340">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0E4D6E"/>
+      <stop offset="1" stop-color="#062639"/>
+    </linearGradient>
+    <linearGradient id="rim" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#9BE1F0"/>
+      <stop offset="1" stop-color="#2FB2D1"/>
+    </linearGradient>
+  </defs>
+
+  <g transform="translate(12 12) scale(0.6)">
+    <rect x="16" y="16" width="480" height="480" rx="112" fill="url(#bg)"/>
+    <circle cx="256" cy="256" r="172" fill="none" stroke="url(#rim)" stroke-width="42"/>
+    <g stroke="#00BCD4" stroke-width="20" stroke-linecap="round">
+      <line x1="172" y1="256" x2="340" y2="256"/>
+      <line x1="256" y1="172" x2="256" y2="340"/>
+    </g>
+  </g>
+
+  <text x="368" y="218" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif"
+        font-size="150" font-weight="700" fill="#0B3A52" letter-spacing="1">DICOMStudio</text>
+  <text x="376" y="286" font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif"
+        font-size="34" font-weight="600" fill="#00BCD4" letter-spacing="9">MODERN OPEN-SOURCE DICOM WORKSTATION</text>
+</svg>

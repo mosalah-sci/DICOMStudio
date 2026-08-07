@@ -1,10 +1,10 @@
 [project]
 name = "dicomviewer"
-description = "DICOM Viewer Professional - a professional-grade DICOM medical image viewer for Windows"
+description = "DICOMStudio - a modern, lightweight and professional desktop DICOM viewer for Windows"
 readme = "README.md"
 requires-python = ">=3.13"
 license = { text = "MIT" }
-authors = [{ name = "DICOM Viewer Professional Team" }]
+authors = [{ name = "DICOMStudio Team" }]
 keywords = ["dicom", "medical-imaging", "viewer", "pyside6"]
 classifiers = [
     "Development Status :: 3 - Alpha",

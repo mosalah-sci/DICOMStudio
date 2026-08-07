@@ -1,4 +1,4 @@
-DICOM Viewer Professional
+DICOMStudio
 Project Constitution
 Version
 

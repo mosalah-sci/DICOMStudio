@@ -1,7 +1,7 @@
 VSVersionInfo(
   ffi=FixedFileInfo(
-    filevers=(1, 0, 0, 0),
-    prodvers=(1, 0, 0, 0),
+    filevers=(1, 0, 1, 0),
+    prodvers=(1, 0, 1, 0),
     mask=0x3f,
     flags=0x0,
     OS=0x40004,
@@ -13,14 +13,14 @@ VSVersionInfo(
     StringFileInfo([
       StringTable(
         '040904B0',
-        [StringStruct('CompanyName', 'DicomViewer'),
-         StringStruct('FileDescription', 'A professional-grade DICOM medical image viewer for Windows.'),
-         StringStruct('FileVersion', '1.0.0'),
-         StringStruct('InternalName', 'DicomViewer'),
-         StringStruct('LegalCopyright', 'Copyright © 2026 DICOM Viewer Professional Team'),
-         StringStruct('OriginalFilename', 'DicomViewer.exe'),
-         StringStruct('ProductName', 'DICOM Viewer Professional'),
-         StringStruct('ProductVersion', '1.0.0')])
+        [StringStruct('CompanyName', 'DICOMStudio'),
+         StringStruct('FileDescription', 'A modern, lightweight desktop DICOM viewer built with Python and PySide6.'),
+         StringStruct('FileVersion', '1.0.1'),
+         StringStruct('InternalName', 'DICOMStudio'),
+         StringStruct('LegalCopyright', 'Copyright © 2026 DICOMStudio Team'),
+         StringStruct('OriginalFilename', 'DICOMStudio.exe'),
+         StringStruct('ProductName', 'DICOMStudio'),
+         StringStruct('ProductVersion', '1.0.1')])
     ]),
     VarFileInfo([VarStruct('Translation', [1033, 1200])])
   ]

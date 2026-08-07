@@ -1,28 +1,28 @@
-; DICOM Viewer Professional installer script (Inno Setup 6).
+; DICOMStudio installer script (Inno Setup 6).
 ;
 ; Compile with ISCC.exe from the repository root:
 ;   & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" packaging\dicomviewer.iss
 ;
 ; The version may be overridden on the command line:
-;   ISCC.exe /DMyAppVersion=1.0.0 packaging\dicomviewer.iss
+;   ISCC.exe /DMyAppVersion=1.0.1 packaging\dicomviewer.iss
 
 #ifndef MyAppVersion
-  #define MyAppVersion "1.0.0"
+  #define MyAppVersion "1.0.1"
 #endif
 
 #ifndef MyAppName
-  #define MyAppName "DICOM Viewer Professional"
+  #define MyAppName "DICOMStudio"
 #endif
 
 #ifndef MyAppPublisher
-  #define MyAppPublisher "DicomViewer"
+  #define MyAppPublisher "DICOMStudio Team"
 #endif
 
 #ifndef MyAppURL
   #define MyAppURL "https://example.com"
 #endif
 
-#define MyAppExeName "DicomViewer.exe"
+#define MyAppExeName "DICOMStudio.exe"
 #define MyAppAssocName "DICOM Image"
 #define MyAppAssocExt ".dcm"
 
@@ -40,8 +40,8 @@ DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 LicenseFile=..\LICENSE
 OutputDir=..\dist\installer
-OutputBaseFilename=DicomViewer-Professional-{#MyAppVersion}-Setup
-SetupIconFile=DicomViewer.ico
+OutputBaseFilename=DICOMStudio-{#MyAppVersion}-Setup
+SetupIconFile=DICOMStudio.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
 UninstallDisplayName={#MyAppName}
 Compression=lzma2
@@ -65,7 +65,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
 [Files]
-Source: "..\dist\DicomViewer\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\dist\DICOMStudio\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 
 [Registry]

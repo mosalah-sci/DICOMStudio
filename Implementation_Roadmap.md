@@ -1,6 +1,6 @@
 IMPLEMENTATION ROADMAP
 
-Project: DICOM Viewer Professional
+Project: DICOMStudio
 
 Version: 1.0
 

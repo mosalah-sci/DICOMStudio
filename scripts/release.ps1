@@ -18,12 +18,12 @@ function Invoke-Step {
 
 $Version = (uv run python -c "from dicomviewer import __version__; print(__version__)").Trim()
 if (-not $Version) { throw "Could not determine the application version" }
-Write-Host "Releasing DICOM Viewer Professional $Version"
+Write-Host "Releasing DICOMStudio $Version"
 
 $DistRoot = Join-Path (Get-Location) "dist"
-$PortableDir = Join-Path $DistRoot "DicomViewer"
-$PortableZip = Join-Path $DistRoot "DicomViewer-Professional-$Version-Portable.zip"
-$SetupExe = Join-Path $DistRoot "installer\DicomViewer-Professional-$Version-Setup.exe"
+$PortableDir = Join-Path $DistRoot "DICOMStudio"
+$PortableZip = Join-Path $DistRoot "DICOMStudio-$Version-Portable.zip"
+$SetupExe = Join-Path $DistRoot "installer\DICOMStudio-$Version-Setup.exe"
 
 # 1. Run the full test suite before packaging anything.
 Invoke-Step "Running the test suite" {
@@ -41,7 +41,7 @@ Invoke-Step "Building the standalone application" {
 # 3. Smoke test the standalone executable.
 Invoke-Step "Smoke testing the standalone executable" {
     $env:QT_QPA_PLATFORM = "windows"
-    & (Join-Path $PortableDir "DicomViewer.exe") --smoke-test
+    & (Join-Path $PortableDir "DICOMStudio.exe") --smoke-test
     if ($LASTEXITCODE -ne 0) { throw "Standalone smoke test failed with exit code $LASTEXITCODE" }
 }
 

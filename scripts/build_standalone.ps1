@@ -1,7 +1,7 @@
 # Release script.
 #
 # Builds the standalone Windows application (folder + launcher executable)
-# into dist/DicomViewer/ using PyInstaller. This folder runs without a Python
+# into dist/DICOMStudio/ using PyInstaller. This folder runs without a Python
 # installation and is the payload for the installer and portable archives.
 
 $ErrorActionPreference = "Stop"
@@ -17,4 +17,4 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 uv run pyinstaller --noconfirm --clean packaging\dicomviewer.spec
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-Write-Host "Standalone build complete. Application is in .\dist\DicomViewer\"
+Write-Host "Standalone build complete. Application is in .\dist\DICOMStudio\"

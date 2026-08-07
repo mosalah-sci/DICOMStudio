@@ -24,7 +24,7 @@ uv sync              # install runtime + dev dependencies (incl. PyInstaller)
 uv run pyinstaller --noconfirm --clean packaging\dicomviewer.spec
 ```
 
-This produces `dist/DicomViewer/` (the `DicomViewer.exe` launcher plus its
+This produces `dist/DICOMStudio/` (the `DICOMStudio.exe` launcher plus its
 support files). The spec:
 
 - packages the `dicomviewer` package data (icons, styles, default settings);
@@ -45,7 +45,7 @@ uv run python scripts/make_version_info.py
     /DMyAppVersion=<version> packaging\dicomviewer.iss
 ```
 
-Output: `dist/installer/DicomViewer-Professional-<version>-Setup.exe`.
+Output: `dist/installer/DICOMStudio-<version>-Setup.exe`.
 
 ## Building the portable archive
 
@@ -53,7 +53,7 @@ Output: `dist/installer/DicomViewer-Professional-<version>-Setup.exe`.
 .\scripts\build_portable.ps1
 ```
 
-Output: `dist/DicomViewer-Professional-<version>-Portable.zip`.
+Output: `dist/DICOMStudio-<version>-Portable.zip`.
 
 ## Release
 
@@ -78,4 +78,4 @@ powershell -ExecutionPolicy Bypass -File scripts\release.ps1
 - [ ] On a clean machine: install, launch, open a DICOM folder, verify
       settings persist, verify resources load, uninstall cleanly.
 - [ ] Bump `src/dicomviewer/_version.py`, update `CHANGELOG.md`, commit, and
-      create an annotated tag (`v1.0.0`).
+      create an annotated tag (`v1.0.1`).

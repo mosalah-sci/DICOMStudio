@@ -2,7 +2,7 @@ AI DEVELOPMENT RULES
 
 
 
-Project: DICOM Viewer Professional
+Project: DICOMStudio
 
 
 

@@ -6,22 +6,26 @@ scripts and can be run manually:
 
     uv run python scripts/make_icon.py
 
-The output is written to ``packaging/DicomViewer.ico``.
+Smaller entries are encoded as uncompressed 32-bit bitmaps (classic ICO) so
+they render in every Windows context; the 256px entry is stored as PNG.
+
+The output is written to ``packaging/DICOMStudio.ico``.
 """
 
 from __future__ import annotations
 
+import struct
 import sys
 from pathlib import Path
 
 from PySide6.QtCore import QBuffer, QByteArray, QRectF, Qt
-from PySide6.QtGui import QGuiApplication, QImageWriter, QPixmap
+from PySide6.QtGui import QGuiApplication, QImage, QImageWriter, QPixmap
 from PySide6.QtSvg import QSvgRenderer
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _SOURCE_SVG = _REPO_ROOT / "packaging" / "app-icon.svg"
-_OUTPUT_ICO = _REPO_ROOT / "packaging" / "DicomViewer.ico"
-_ICON_SIZES = (16, 24, 32, 48, 64, 128, 256)
+_OUTPUT_ICO = _REPO_ROOT / "packaging" / "DICOMStudio.ico"
+_ICON_SIZES = (16, 20, 24, 32, 40, 48, 64, 128, 256)
 
 
 def _render_svg(source: Path, size: int) -> QPixmap:
@@ -41,50 +45,67 @@ def _render_svg(source: Path, size: int) -> QPixmap:
     return pixmap
 
 
+def _bmp_entry(pixmap: QPixmap) -> bytes:
+    """Encode a pixmap as a 32-bit ICO bitmap entry (XOR + AND mask)."""
+    size = pixmap.width()
+    image = pixmap.toImage().convertToFormat(QImage.Format.Format_ARGB32)
+    raw = bytes(image.constBits())
+    # BGRA rows, top to bottom (ARGB32 in little-endian memory order).
+    rows = [raw[row * size * 4 : (row + 1) * size * 4] for row in range(size)]
+
+    header = struct.pack(
+        "<IiiHHIIiiII",
+        40,  # biSize
+        size,
+        size * 2,  # biHeight: XOR + AND planes
+        1,  # biPlanes
+        32,  # biBitCount
+        0,  # biCompression (BI_RGB)
+        size * size * 4,  # biSizeImage
+        0,
+        0,
+        0,
+        0,
+    )
+    xor = b"".join(reversed(rows))  # bottom-up
+    mask_row_bytes = ((size + 31) // 32) * 4
+    and_mask = b"\x00" * (mask_row_bytes * size)
+    return header + xor + and_mask
+
+
+def _png_entry(pixmap: QPixmap) -> bytes:
+    """Encode a pixmap as a PNG payload for the 256px ICO entry."""
+    image = pixmap.toImage()
+    data = QByteArray()
+    buffer = QBuffer(data)
+    buffer.open(QBuffer.OpenModeFlag.WriteOnly)
+    writer = QImageWriter(buffer, b"png")
+    if not writer.write(image):
+        raise RuntimeError("Failed to encode PNG icon entry")
+    buffer.close()
+    return bytes(data)
+
+
 def build_ico(source: Path, output: Path, sizes: tuple[int, ...]) -> None:
     """Render each size and pack them into a single ICO file."""
-    icondir = b""
-    png_data: list[bytes] = []
-    header = 6 + 16 * len(sizes)
-    offset = header
+    entries: list[tuple[int, bytes]] = []
     for size in sizes:
         pixmap = _render_svg(source, size)
-        pixmap.setDevicePixelRatio(1.0)
-        image = pixmap.toImage()
-        if image.isNull():
+        if pixmap.isNull():
             raise RuntimeError(f"Failed to rasterize icon at {size}px")
-        data = QByteArray()
-        buffer = QBuffer(data)
-        buffer.open(QBuffer.OpenModeFlag.WriteOnly)
-        writer = QImageWriter(buffer, b"png")
-        if not writer.write(image):
-            raise RuntimeError(f"Failed to encode icon at {size}px")
-        buffer.close()
-        blob = bytes(data)
-        png_data.append(blob)
-        icondir += bytes(
-            [
-                size if size < 256 else 0,
-                size if size < 256 else 0,
-                0,
-                0,
-                1,
-                0,
-                32,
-                0,
-            ]
-        )
-        icondir += (len(blob) & 0xFF).to_bytes(1, "little")
-        icondir += ((len(blob) >> 8) & 0xFF).to_bytes(1, "little")
-        icondir += ((len(blob) >> 16) & 0xFF).to_bytes(1, "little")
-        icondir += ((len(blob) >> 24) & 0xFF).to_bytes(1, "little")
-        icondir += (offset & 0xFF).to_bytes(1, "little")
-        icondir += ((offset >> 8) & 0xFF).to_bytes(1, "little")
-        icondir += ((offset >> 16) & 0xFF).to_bytes(1, "little")
-        icondir += ((offset >> 24) & 0xFF).to_bytes(1, "little")
+        if size >= 256:
+            entries.append((size, _png_entry(pixmap)))
+        else:
+            entries.append((size, _bmp_entry(pixmap)))
+
+    header = struct.pack("<HHH", 0, 1, len(entries))
+    icondir = b""
+    offset = 6 + 16 * len(entries)
+    for size, blob in entries:
+        dim = size if size < 256 else 0
+        icondir += struct.pack("<BBBBHHII", dim, dim, 0, 0, 1, 32, len(blob), offset)
         offset += len(blob)
-    ico_header = bytes([0, 0, 1, 0, len(sizes) & 0xFF, 0])
-    output.write_bytes(ico_header + icondir + b"".join(png_data))
+    output.write_bytes(header + icondir + b"".join(blob for _, blob in entries))
 
 
 def main() -> int:

@@ -65,7 +65,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
 
     _prepare_qt_environment()
-    application = _create_application("dicomviewer", options.qt_arguments)
+    application = _create_application("DICOMStudio", options.qt_arguments)
     paths = AppPaths(APP_DIR_NAME)
     paths.ensure_dirs()
     try:

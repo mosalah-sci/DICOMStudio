@@ -1,7 +1,7 @@
-# DICOM Viewer Professional
+# DICOMStudio
 
-A professional-grade DICOM medical image viewer for Microsoft Windows, built
-with Python 3.13 and PySide6.
+A modern, lightweight and professional desktop DICOM viewer for Microsoft
+Windows, built with Python 3.13 and PySide6.
 
 The project is developed incrementally against an approved roadmap
 (`docs/`). Every milestone produces a stable, tagged, runnable application
@@ -10,7 +10,7 @@ imaging platform (PACS, MPR, 3D, AI-assisted analysis, and more).
 
 ## Status
 
-Milestone 12 — Production Readiness (v1.0.0)
+Milestone 12 — Production Readiness (v1.0.1)
 
 ## Technology Stack
 
@@ -64,10 +64,10 @@ uv run python -m dicomviewer <file.dcm>     # open a DICOM file's folder
 ## Distribution
 
 Windows end users can install the app with the Inno Setup installer
-(`dist/installer/DicomViewer-Professional-<version>-Setup.exe`), use it as a
+(`dist/installer/DICOMStudio-<version>-Setup.exe`), use it as a
 portable app (extract
-`dist/DicomViewer-Professional-<version>-Portable.zip`), or run the standalone
-folder in `dist/DicomViewer/`. No Python is required. See
+`dist/DICOMStudio-<version>-Portable.zip`), or run the standalone
+folder in `dist/DICOMStudio/`. No Python is required. See
 `docs/build.md` for the release process and `docs/user/README.md` for the
 installation guide.
 

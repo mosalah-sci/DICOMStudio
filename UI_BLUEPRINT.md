@@ -2,7 +2,7 @@ UI BLUEPRINT
 
 
 
-Project: DICOM Viewer Professional
+Project: DICOMStudio
 
 
 

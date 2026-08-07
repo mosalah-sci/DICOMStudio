@@ -1,16 +1,16 @@
-# DICOM Viewer Professional — Installation Guide
+# DICOMStudio — Installation Guide
 
-DICOM Viewer Professional is a standalone Windows application: it does not
+DICOMStudio is a standalone Windows application: it does not
 require Python or any other runtime to be installed.
 
 ## Installation
 
-Run the installer `DicomViewer-Professional-<version>-Setup.exe` and follow
+Run the installer `DICOMStudio-<version>-Setup.exe` and follow
 the on-screen steps. The installer:
 
 - installs the application for your user account (no administrator rights
   required);
-- adds a **DICOM Viewer Professional** entry to the Start Menu;
+- adds a **DICOMStudio** entry to the Start Menu;
 - offers an optional **desktop shortcut** (unchecked by default);
 - associates `.dcm` files so double-clicking a DICOM image opens it in the
   viewer (it opens the image's containing folder);
@@ -19,14 +19,14 @@ the on-screen steps. The installer:
 ### Portable use
 
 Prefer not to install? Extract
-`DicomViewer-Professional-<version>-Portable.zip` anywhere (a USB drive, for
-example) and run `DicomViewer.exe` from the extracted folder. Everything runs
+`DICOMStudio-<version>-Portable.zip` anywhere (a USB drive, for
+example) and run `DICOMStudio.exe` from the extracted folder. Everything runs
 from that folder; nothing is written outside your user profile.
 
 ### Command line
 
 ```
-DicomViewer.exe [--version] [--smoke-test] [--theme <name>] [<file-or-folder>]
+DICOMStudio.exe [--version] [--smoke-test] [--theme <name>] [<file-or-folder>]
 ```
 
 - `--version` — print the version and exit.
