@@ -168,6 +168,31 @@ def test_scan_can_be_cancelled(scanner: PydicomStudyScanner, tmp_path: Path) -> 
     assert tree.patients == ()
 
 
+def test_scan_reports_throttled_progress(scanner: PydicomStudyScanner, tmp_path: Path) -> None:
+    folder = _build_folder(tmp_path)
+    reports: list[tuple[int, int]] = []
+    tree = scanner.scan(
+        folder, on_progress=lambda scanned, invalid: reports.append((scanned, invalid))
+    )
+    assert reports
+    # 5 valid instances + 1 corrupt candidate; the text file is filtered by
+    # extension and never counted. The final report reflects the totals.
+    assert reports[-1] == (6, 1)
+    assert tree.invalid_files == 1
+
+
+def test_scan_reports_progress_even_with_no_valid_files(
+    scanner: PydicomStudyScanner,
+    tmp_path: Path,
+) -> None:
+    folder = tmp_path / "junk"
+    folder.mkdir()
+    (folder / "corrupt.dcm").write_bytes(b"\x01\x02not a real dicom file")
+    reports: list[tuple[int, int]] = []
+    scanner.scan(folder, on_progress=lambda scanned, invalid: reports.append((scanned, invalid)))
+    assert reports == [(1, 1)]
+
+
 def test_scan_raises_for_missing_folder(scanner: PydicomStudyScanner, tmp_path: Path) -> None:
     with pytest.raises(DiscoveryError):
         scanner.scan(tmp_path / "does-not-exist")

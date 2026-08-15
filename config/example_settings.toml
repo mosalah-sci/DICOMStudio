@@ -10,3 +10,11 @@
 level = "INFO"
 rotation = "10 MB"
 retention = "7 days"
+
+[workspace]
+# Sidebar visibility and widths are persisted here so the workspace layout
+# survives restarts alongside the typed settings.
+study_explorer_visible = true
+metadata_visible = true
+study_explorer_width = 260
+metadata_width = 300

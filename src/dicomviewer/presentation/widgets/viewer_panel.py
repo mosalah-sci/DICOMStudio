@@ -30,6 +30,8 @@ class ViewerPanel(QWidget):
     window_level_changed = Signal(object, float)
     measurements_changed = Signal(object)
     measure_mode_changed = Signal(object)
+    open_folder_requested = Signal()
+    escape_pressed = Signal()
 
     def __init__(
         self,
@@ -50,6 +52,7 @@ class ViewerPanel(QWidget):
         self._viewer.window_level_changed.connect(self.window_level_changed)
         self._viewer.measurements_changed.connect(self.measurements_changed)
         self._viewer.measure_mode_changed.connect(self.measure_mode_changed)
+        self._viewer.escape_pressed.connect(self.escape_pressed)
 
         self._stack = QStackedWidget(self)
         self._stack.addWidget(
@@ -57,8 +60,13 @@ class ViewerPanel(QWidget):
                 self,
                 icon_provider,
                 icon_name="activity",
-                title="No study loaded",
-                description="Open a folder and select a series to begin examining DICOM studies.",
+                title="Welcome to DICOMStudio",
+                description=(
+                    "Open a folder of DICOM studies to begin, or drag and drop "
+                    "a DICOM file or folder anywhere in this window."
+                ),
+                action_text="Open Folder...",
+                on_action=self.open_folder_requested.emit,
             )
         )
         self._stack.addWidget(self._viewer)

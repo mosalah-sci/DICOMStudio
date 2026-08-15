@@ -71,7 +71,8 @@ def make_window(
     ) -> MainWindow:
         settings_path = tmp_path / "settings.toml"
         settings_service = SettingsService(load_default_settings(), settings_path)
-        theme_manager = ThemeManager(settings_service, load_default_settings())
+        settings = settings_service.load()
+        theme_manager = ThemeManager(settings_service, settings)
         if theme != "dark":
             theme_manager.apply_override(theme)
         theme_controller = ThemeController(theme_manager, ThemeProvider(qapp), icon_provider)

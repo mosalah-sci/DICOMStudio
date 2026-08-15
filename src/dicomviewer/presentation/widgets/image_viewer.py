@@ -73,6 +73,7 @@ class ImageViewerWidget(QWidget):
     window_level_changed = Signal(object, float)  # center (None = auto), width
     measurements_changed = Signal(object)  # MeasurementCollection
     measure_mode_changed = Signal(object)  # MeasurementKind | None
+    escape_pressed = Signal()  # Esc with no active tool, e.g. to leave fullscreen
 
     def __init__(
         self,
@@ -435,7 +436,7 @@ class ImageViewerWidget(QWidget):
         event.accept()
 
     def keyPressEvent(self, event: QKeyEvent) -> None:  # noqa: N802
-        """Navigate slices and zoom from the keyboard."""
+        """Navigate, zoom and run viewer shortcuts from the keyboard."""
         key = event.key()
         if key in (Qt.Key.Key_Up, Qt.Key.Key_Left, Qt.Key.Key_PageUp):
             self.previous_slice()
@@ -455,8 +456,25 @@ class ImageViewerWidget(QWidget):
         elif key == Qt.Key.Key_Minus:
             self.zoom_out()
             event.accept()
-        elif key == Qt.Key.Key_Escape and self._measure_tool.is_active():
-            self.set_measure_mode(None)
+        elif key == Qt.Key.Key_F and self.has_image:
+            self.fit_to_window()
+            event.accept()
+        elif key == Qt.Key.Key_R and self.has_image:
+            self.reset_view()
+            event.accept()
+        elif key == Qt.Key.Key_W and self.has_image:
+            self.reset_window_level()
+            event.accept()
+        elif key == Qt.Key.Key_M and self.has_image:
+            self.set_measure_mode(
+                None if self._measure_tool.is_active() else MeasurementKind.DISTANCE
+            )
+            event.accept()
+        elif key == Qt.Key.Key_Escape:
+            if self._measure_tool.is_active():
+                self.set_measure_mode(None)
+            else:
+                self.escape_pressed.emit()
             event.accept()
         else:
             super().keyPressEvent(event)
@@ -527,7 +545,7 @@ class ImageViewerWidget(QWidget):
         try:
             pixels = self._decoder.decode(self._images[index])
         except (UnsupportedPixelFormatError, OSError) as exc:
-            self._last_error = str(exc)
+            self._report_error("This image could not be decoded.", exc)
             return None
         self._cache[index] = pixels
         self._evict_cache()
@@ -591,7 +609,7 @@ class ImageViewerWidget(QWidget):
             try:
                 rendered = self._renderer.render(pixels, self._viewport)
             except RenderingError as exc:
-                self._last_error = str(exc)
+                self._report_error("This image could not be rendered.", exc)
                 self._rendered = None
                 self._qimage = None
                 return
@@ -600,6 +618,15 @@ class ImageViewerWidget(QWidget):
         self._last_error = None
         self._rendered = rendered
         self._qimage = to_qimage(rendered)
+
+    def _report_error(self, message: str, exc: BaseException) -> None:
+        """Record a user-safe message while logging the technical detail.
+
+        Raw exceptions are never painted on screen; the full detail goes to
+        the log only, matching the project error-handling strategy.
+        """
+        logger.warning("Image display issue: {}", exc)
+        self._last_error = message
 
     def _effective_scale(self) -> float:
         """Return the scale factor that maps image pixels to widget pixels."""

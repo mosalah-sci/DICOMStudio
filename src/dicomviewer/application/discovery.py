@@ -26,11 +26,14 @@ class StudyScanner(Protocol):
         self,
         folder: Path,
         should_cancel: Callable[[], bool] | None = None,
+        on_progress: Callable[[int, int], None] | None = None,
     ) -> StudyTree:
         """Scan ``folder`` and return the discovered hierarchy.
 
         Invalid or unreadable files are ignored gracefully. The optional
-        ``should_cancel`` predicate lets long scans be aborted cooperatively.
+        ``should_cancel`` predicate lets long scans be aborted cooperatively;
+        ``on_progress`` receives ``(files_scanned, files_invalid)`` counts at
+        a throttled cadence so the UI can stay responsive and informative.
         """
         ...
 

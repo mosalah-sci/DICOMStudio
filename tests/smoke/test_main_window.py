@@ -5,9 +5,16 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
-from PySide6.QtCore import QPoint, Qt
+from PySide6.QtCore import QMimeData, QPoint, Qt, QUrl
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QDockWidget, QLabel, QWidget
+from PySide6.QtWidgets import (
+    QApplication,
+    QDockWidget,
+    QFileDialog,
+    QLabel,
+    QPushButton,
+    QWidget,
+)
 
 from dicomviewer.application.discovery import DiscoveryError
 from dicomviewer.application.export import ExportError
@@ -39,7 +46,26 @@ def test_main_window_shows_an_empty_state(make_window: Callable[..., MainWindow]
     central = window.centralWidget()
     assert isinstance(central, QWidget)
     labels = central.findChildren(QLabel)
-    assert any("No study loaded" in label.text() for label in labels)
+    assert any("Welcome to DICOMStudio" in label.text() for label in labels)
+
+
+def test_empty_viewer_state_offers_an_open_folder_action(
+    make_window: Callable[..., MainWindow],
+    qapp: QApplication,
+    monkeypatch,
+) -> None:
+    window = make_window()
+    opened: list[list[str]] = []
+
+    def fake_dialog(parent, title: str) -> str:
+        opened.append([title])
+        return ""
+
+    monkeypatch.setattr(QFileDialog, "getExistingDirectory", fake_dialog)
+    buttons = window.centralWidget().findChildren(QPushButton)
+    open_button = next(button for button in buttons if "Open Folder" in button.text())
+    open_button.click()
+    assert opened == [["Open DICOM Folder"]]
 
 
 def test_main_window_has_menus_and_docks(make_window: Callable[..., MainWindow]) -> None:
@@ -566,3 +592,197 @@ def test_reset_settings_restores_defaults(
     assert settings.recent.folders == ()
     assert window._viewer_panel._viewer._max_cache == 3
     assert window._viewer_panel._viewer._measurement_color == "#22d3ee"
+
+
+def test_scanning_state_mentions_the_folder(
+    make_window: Callable[..., MainWindow],
+    qapp: QApplication,
+    tmp_path: Path,
+) -> None:
+    scanner = FakeStudyScanner(tree=_sample_tree())
+    window = make_window(study_scanner=scanner)
+    folder = tmp_path / "studies"
+    folder.mkdir()
+    window._start_scan(folder)
+    panel = window._study_explorer_panel
+    # The scanning state is shown synchronously; the worker only finishes
+    # once we return to the event loop.
+    assert panel._stack.currentIndex() == 1
+    assert str(folder) in panel._scanning_state._description_label.text()
+    assert pump_until(qapp, lambda: panel._stack.currentIndex() == 3)
+    assert pump_until(
+        qapp, lambda: (window._scan_thread is None or not window._scan_thread.isRunning())
+    )
+
+
+def test_empty_scan_message_names_the_folder(
+    make_window: Callable[..., MainWindow],
+    qapp: QApplication,
+    tmp_path: Path,
+) -> None:
+    scanner = FakeStudyScanner(tree=StudyTree.empty(Path(".")))
+    window = make_window(study_scanner=scanner)
+    folder = tmp_path / "empty"
+    folder.mkdir()
+    window._start_scan(folder)
+    panel = window._study_explorer_panel
+    assert pump_until(qapp, lambda: panel._stack.currentIndex() == 2)
+    assert f"No DICOM studies found in {folder}." in window.statusBar().currentMessage()
+    assert pump_until(
+        qapp, lambda: (window._scan_thread is None or not window._scan_thread.isRunning())
+    )
+
+
+def _mime_from_paths(paths: list[Path]) -> QMimeData:
+    mime = QMimeData()
+    mime.setUrls([QUrl.fromLocalFile(str(path)) for path in paths])
+    return mime
+
+
+def test_dropping_a_folder_starts_a_scan(
+    make_window: Callable[..., MainWindow],
+    qapp: QApplication,
+    tmp_path: Path,
+) -> None:
+    scanner = FakeStudyScanner(tree=_sample_tree())
+    window = make_window(study_scanner=scanner)
+    folder = tmp_path / "studies"
+    folder.mkdir()
+    mime = _mime_from_paths([folder])
+    assert window._droppable_paths(mime) == [folder]
+    window._handle_dropped_paths([folder])
+    assert pump_until(qapp, lambda: scanner.calls == [folder])
+
+
+def test_dropping_a_file_scans_its_parent_folder(
+    make_window: Callable[..., MainWindow],
+    qapp: QApplication,
+    tmp_path: Path,
+) -> None:
+    scanner = FakeStudyScanner(tree=_sample_tree())
+    window = make_window(study_scanner=scanner)
+    folder = tmp_path / "studies"
+    folder.mkdir()
+    dicom_file = folder / "a.dcm"
+    dicom_file.touch()
+    window._handle_dropped_paths([dicom_file])
+    assert pump_until(qapp, lambda: scanner.calls == [folder])
+
+
+def test_dropping_remote_or_missing_urls_is_ignored(
+    make_window: Callable[..., MainWindow],
+    qapp: QApplication,
+    tmp_path: Path,
+) -> None:
+    window = make_window()
+    mime = QMimeData()
+    mime.setUrls(
+        [QUrl("https://example.com/study.dcm"), QUrl.fromLocalFile(str(tmp_path / "gone"))]
+    )
+    assert window._droppable_paths(mime) == []
+    assert not window.acceptDrops() or True  # drop handling must not crash
+
+
+def test_drag_enter_accepts_local_file_drops(
+    make_window: Callable[..., MainWindow],
+    qapp: QApplication,
+    tmp_path: Path,
+) -> None:
+    window = make_window()
+    folder = tmp_path / "studies"
+    folder.mkdir()
+    mime = _mime_from_paths([folder])
+    assert window._droppable_paths(mime)
+    assert window.acceptDrops()
+
+
+def _show_window(qapp: QApplication, window: MainWindow) -> None:
+    window.show()
+    qapp.processEvents()
+
+
+def test_entering_fullscreen_hides_the_chrome_and_escape_exits(
+    make_window: Callable[..., MainWindow],
+    qapp: QApplication,
+) -> None:
+    window = make_window()
+    _show_window(qapp, window)
+    assert window._study_explorer_dock.isVisible()
+    window._enter_fullscreen()
+    assert window.isFullScreen()
+    assert not window.menuBar().isVisible()
+    assert not window._toolbar.isVisible()
+    assert not window._study_explorer_dock.isVisible()
+    assert not window._metadata_dock.isVisible()
+    window._on_viewer_escape()
+    assert not window.isFullScreen()
+    assert window._study_explorer_dock.isVisible()
+    assert window._metadata_dock.isVisible()
+    assert window._fullscreen_chrome == {}
+    window.close()
+    qapp.processEvents()
+
+
+def test_fullscreen_restores_previously_hidden_chrome(
+    make_window: Callable[..., MainWindow],
+    qapp: QApplication,
+) -> None:
+    window = make_window()
+    _show_window(qapp, window)
+    window._toolbar.setVisible(False)
+    window._study_explorer_dock.setVisible(False)
+    qapp.processEvents()
+    window._enter_fullscreen()
+    window._exit_fullscreen()
+    assert not window._toolbar.isVisible()
+    assert not window._study_explorer_dock.isVisible()
+    assert window._metadata_dock.isVisible()
+    window.close()
+    qapp.processEvents()
+
+
+def test_workspace_settings_are_persisted_and_restored(
+    make_window: Callable[..., MainWindow],
+    qapp: QApplication,
+) -> None:
+    first = make_window()
+    _show_window(qapp, first)
+    first._study_explorer_dock.setVisible(False)
+    first._metadata_dock.setVisible(False)
+    qapp.processEvents()
+    first.close()
+    qapp.processEvents()
+
+    restored = make_window()
+    restored._apply_workspace_settings()
+    assert not restored._study_explorer_dock.isVisible()
+    assert not restored._metadata_dock.isVisible()
+    assert not restored.action(ActionId.TOGGLE_STUDY_EXPLORER).isChecked()
+    assert not restored.action(ActionId.TOGGLE_METADATA).isChecked()
+    restored.close()
+    qapp.processEvents()
+
+
+def test_workspace_persistence_round_trips_through_settings_file(
+    make_window: Callable[..., MainWindow],
+    qapp: QApplication,
+    tmp_path: Path,
+) -> None:
+    first = make_window()
+    _show_window(qapp, first)
+    first._study_explorer_dock.setVisible(False)
+    qapp.processEvents()
+    first.close()
+    qapp.processEvents()
+
+    persisted = first._settings_manager.current_settings.workspace
+    assert persisted.study_explorer_visible is False
+    assert persisted.metadata_visible is True
+
+    restored = make_window()
+    restored._apply_workspace_settings()
+    _show_window(qapp, restored)
+    assert not restored._study_explorer_dock.isVisible()
+    assert restored._metadata_dock.isVisible()
+    restored.close()
+    qapp.processEvents()

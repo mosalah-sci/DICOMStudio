@@ -8,6 +8,8 @@ import pytest
 
 from dicomviewer.domain.settings import (
     MAX_RECENT_FOLDERS,
+    MAX_SIDEBAR_WIDTH,
+    MIN_SIDEBAR_WIDTH,
     AppearanceSettings,
     LoggingSettings,
     MeasurementSettings,
@@ -15,6 +17,7 @@ from dicomviewer.domain.settings import (
     Settings,
     SettingsError,
     ViewingSettings,
+    WorkspaceSettings,
 )
 
 
@@ -145,3 +148,65 @@ def test_measurement_color_rejects_invalid_hex() -> None:
         MeasurementSettings.from_mapping({"color": "red"})
     with pytest.raises(SettingsError):
         MeasurementSettings.from_mapping({"color": "#12"})
+
+
+def test_workspace_defaults_show_both_sidebars() -> None:
+    workspace = WorkspaceSettings()
+    assert workspace.study_explorer_visible is True
+    assert workspace.metadata_visible is True
+    assert workspace.study_explorer_width == 260
+    assert workspace.metadata_width == 300
+
+
+def test_workspace_round_trips_through_mapping() -> None:
+    workspace = WorkspaceSettings(
+        study_explorer_visible=False,
+        metadata_visible=False,
+        study_explorer_width=340,
+        metadata_width=420,
+    )
+    assert WorkspaceSettings.from_mapping(workspace.to_mapping()) == workspace
+
+
+def test_workspace_booleans_are_validated() -> None:
+    assert (
+        WorkspaceSettings.from_mapping({"study_explorer_visible": False}).study_explorer_visible
+        is False
+    )
+    with pytest.raises(SettingsError):
+        WorkspaceSettings.from_mapping({"metadata_visible": "no"})
+
+
+def test_workspace_widths_are_bounded() -> None:
+    assert (
+        WorkspaceSettings.from_mapping(
+            {"study_explorer_width": MIN_SIDEBAR_WIDTH - 5}
+        ).study_explorer_width
+        == MIN_SIDEBAR_WIDTH
+    )
+    assert (
+        WorkspaceSettings.from_mapping(
+            {"study_explorer_width": MAX_SIDEBAR_WIDTH + 5}
+        ).study_explorer_width
+        == MAX_SIDEBAR_WIDTH
+    )
+    assert WorkspaceSettings.from_mapping({"metadata_width": 200}).metadata_width == 200
+
+
+def test_workspace_widths_reject_non_integers() -> None:
+    with pytest.raises(SettingsError):
+        WorkspaceSettings.from_mapping({"study_explorer_width": "wide"})
+
+
+def test_settings_round_trip_preserves_workspace() -> None:
+    settings = Settings(
+        logging=LoggingSettings(),
+        workspace=WorkspaceSettings(
+            study_explorer_visible=False,
+            metadata_width=500,
+        ),
+    )
+    rebuilt = Settings.from_mapping(settings.to_mapping())
+    assert rebuilt == settings
+    assert rebuilt.workspace.study_explorer_visible is False
+    assert rebuilt.workspace.metadata_width == 500

@@ -85,15 +85,14 @@ class StudyExplorerPanel(QWidget):
                 description="Open a folder to browse DICOM studies.",
             )
         )
-        self._stack.addWidget(
-            EmptyState(
-                self,
-                icon_provider,
-                icon_name="activity",
-                title="Scanning folder…",
-                description="Discovering DICOM studies. This may take a moment.",
-            )
+        self._scanning_state = EmptyState(
+            self,
+            icon_provider,
+            icon_name="activity",
+            title="Scanning folder…",
+            description="Discovering DICOM studies. This may take a moment.",
         )
+        self._stack.addWidget(self._scanning_state)
         self._stack.addWidget(
             EmptyState(
                 self,
@@ -116,10 +115,18 @@ class StudyExplorerPanel(QWidget):
         self._clear_tree()
         self._stack.setCurrentIndex(_PAGE_INITIAL)
 
-    def show_scanning(self) -> None:
-        """Show the scanning indicator and drop any pending thumbnails."""
+    def show_scanning(self, folder: Path | None = None) -> None:
+        """Show the scanning indicator, optionally naming the folder scanned."""
         self._loader.cancel_pending()
         self._clear_tree()
+        if folder is not None:
+            self._scanning_state.set_description(
+                f"Discovering DICOM studies in {folder}. This may take a moment."
+            )
+        else:
+            self._scanning_state.set_description(
+                "Discovering DICOM studies. This may take a moment."
+            )
         self._stack.setCurrentIndex(_PAGE_SCANNING)
 
     def set_study_tree(self, tree: StudyTree) -> None:

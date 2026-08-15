@@ -11,6 +11,24 @@ from dicomviewer.domain.studies import StudyTree
 from dicomviewer.presentation.workers.scan_worker import StudyScanWorker
 
 
+def test_worker_emits_progress_counts(qapp) -> None:
+    scanner = FakeStudyScanner()
+    worker = StudyScanWorker(scanner, Path("studies"))
+    progress: list = []
+    worker.progress.connect(lambda scanned, invalid: progress.append((scanned, invalid)))
+    worker.run()
+    assert progress == [(1, 0)]
+
+
+def test_worker_does_not_emit_progress_when_the_scan_throws(qapp) -> None:
+    scanner = FakeStudyScanner(error=DiscoveryError("Folder not found: X"))
+    worker = StudyScanWorker(scanner, Path("studies"))
+    progress: list = []
+    worker.progress.connect(progress.append)
+    worker.run()
+    assert progress == []
+
+
 def test_worker_emits_finished_with_the_tree(qapp) -> None:
     scanner = FakeStudyScanner()
     worker = StudyScanWorker(scanner, Path("studies"))

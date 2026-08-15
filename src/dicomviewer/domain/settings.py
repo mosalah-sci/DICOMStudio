@@ -21,6 +21,11 @@ VALID_THEMES = frozenset({"dark", "light"})
 MAX_RECENT_FOLDERS = 8
 MIN_CACHE_SIZE = 1
 MAX_CACHE_SIZE = 16
+# Sidebar width bounds (pixels). The app persists live dock widths here, so
+# values outside this range are clamped to keep the panels usable on any
+# monitor size rather than being rejected.
+MIN_SIDEBAR_WIDTH = 120
+MAX_SIDEBAR_WIDTH = 1200
 _HEX_COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
 
 
@@ -148,6 +153,45 @@ class MeasurementSettings:
 
 
 @dataclass(frozen=True)
+class WorkspaceSettings:
+    """Sidebar visibility and dimensions restored on every launch.
+
+    Only non-sensitive workspace preferences are persisted here; the window
+    geometry itself lives in the window-state store as an opaque Qt payload.
+    """
+
+    study_explorer_visible: bool = True
+    metadata_visible: bool = True
+    study_explorer_width: int = 260
+    metadata_width: int = 300
+
+    @classmethod
+    def from_mapping(cls, data: Mapping[str, Any]) -> WorkspaceSettings:
+        """Build settings from a TOML ``[workspace]`` mapping."""
+        return cls(
+            study_explorer_visible=_validate_bool(
+                "study_explorer_visible", data.get("study_explorer_visible", True)
+            ),
+            metadata_visible=_validate_bool("metadata_visible", data.get("metadata_visible", True)),
+            study_explorer_width=_validate_sidebar_width(
+                "study_explorer_width", data.get("study_explorer_width", 260)
+            ),
+            metadata_width=_validate_sidebar_width(
+                "metadata_width", data.get("metadata_width", 300)
+            ),
+        )
+
+    def to_mapping(self) -> dict[str, Any]:
+        """Return the settings as a plain TOML-serializable mapping."""
+        return {
+            "study_explorer_visible": self.study_explorer_visible,
+            "metadata_visible": self.metadata_visible,
+            "study_explorer_width": self.study_explorer_width,
+            "metadata_width": self.metadata_width,
+        }
+
+
+@dataclass(frozen=True)
 class Settings:
     """Immutable snapshot of the full application configuration."""
 
@@ -156,6 +200,7 @@ class Settings:
     recent: RecentFoldersSettings = RecentFoldersSettings()
     viewing: ViewingSettings = ViewingSettings()
     measurements: MeasurementSettings = MeasurementSettings()
+    workspace: WorkspaceSettings = WorkspaceSettings()
 
     @classmethod
     def from_mapping(cls, data: Mapping[str, Any]) -> Settings:
@@ -190,12 +235,19 @@ class Settings:
             if measurements_data is not None
             else MeasurementSettings()
         )
+        workspace_data = as_str_mapping(data.get("workspace"))
+        workspace_settings = (
+            WorkspaceSettings.from_mapping(workspace_data)
+            if workspace_data is not None
+            else WorkspaceSettings()
+        )
         return cls(
             logging=logging_settings,
             appearance=appearance_settings,
             recent=recent_settings,
             viewing=viewing_settings,
             measurements=measurements_settings,
+            workspace=workspace_settings,
         )
 
     def to_mapping(self) -> dict[str, Any]:
@@ -206,6 +258,7 @@ class Settings:
             "recent": self.recent.to_mapping(),
             "viewing": self.viewing.to_mapping(),
             "measurements": self.measurements.to_mapping(),
+            "workspace": self.workspace.to_mapping(),
         }
 
 
@@ -253,6 +306,13 @@ def _validate_bool(field: str, value: Any) -> bool:
     if not isinstance(value, bool):
         raise SettingsError(f"Invalid value for '{field}': {value!r}")
     return value
+
+
+def _validate_sidebar_width(field: str, value: Any) -> int:
+    """Validate and clamp a sidebar width in pixels."""
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise SettingsError(f"Invalid value for '{field}': {value!r}")
+    return min(MAX_SIDEBAR_WIDTH, max(MIN_SIDEBAR_WIDTH, value))
 
 
 def _validate_color(value: Any) -> str:

@@ -31,12 +31,14 @@ class FakeStudyScanner:
         self.error = error
         self.calls: list[Path] = []
 
-    def scan(self, folder: Path, should_cancel=None) -> StudyTree:
+    def scan(self, folder: Path, should_cancel=None, on_progress=None) -> StudyTree:
         self.calls.append(Path(folder))
         if self.error is not None:
             raise self.error
         if should_cancel is not None and should_cancel():
             return self.tree
+        if on_progress is not None:
+            on_progress(1, 0)
         return self.tree
 
 

@@ -11,6 +11,7 @@ from tests.dicom_utils import FakeImageAnalyzer, FakePixelDecoder, FakeViewRende
 
 from dicomviewer.application.viewing import UnsupportedPixelFormatError
 from dicomviewer.domain.image_processing import WindowPreset
+from dicomviewer.domain.measurement import MeasurementKind
 from dicomviewer.domain.studies import Image
 from dicomviewer.domain.viewport import FitMode
 from dicomviewer.presentation.widgets.image_viewer import ImageViewerWidget
@@ -250,13 +251,73 @@ def test_plus_and_minus_keys_zoom(qapp) -> None:
     assert viewer.viewport.zoom == 1.0
 
 
-def test_decode_failure_shows_error_without_crashing(qapp) -> None:
+def test_f_key_fits_to_window(qapp) -> None:
+    viewer = _viewer()
+    viewer.resize(8, 6)
+    viewer.load_series(_series())
+    viewer.zoom_in()
+    assert viewer.viewport.fit_mode is not FitMode.FIT
+    QTest.keyClick(viewer, Qt.Key.Key_F)
+    assert viewer.viewport.fit_mode is FitMode.FIT
+
+
+def test_r_key_resets_the_view(qapp) -> None:
+    viewer = _viewer()
+    viewer.resize(8, 6)
+    viewer.load_series(_series())
+    viewer.zoom_in()
+    viewer.reset_window_level()
+    QTest.keyClick(viewer, Qt.Key.Key_R)
+    assert viewer.viewport.fit_mode is FitMode.FIT
+    assert viewer.viewport.window_width == 0.0
+
+
+def test_w_key_resets_window_level(qapp) -> None:
+    viewer = _viewer()
+    viewer.load_series(_series())
+    viewer.set_window(40.0, 400.0)
+    QTest.keyClick(viewer, Qt.Key.Key_W)
+    assert viewer.viewport.window_center is None
+    assert viewer.viewport.window_width == 0.0
+
+
+def test_m_key_toggles_measure_mode(qapp) -> None:
+    viewer = _viewer()
+    viewer.load_series(_series())
+    assert viewer.measure_mode is None
+    QTest.keyClick(viewer, Qt.Key.Key_M)
+    assert viewer.measure_mode is MeasurementKind.DISTANCE
+    QTest.keyClick(viewer, Qt.Key.Key_M)
+    assert viewer.measure_mode is None
+
+
+def test_escape_without_a_tool_emits_escape_pressed(qapp) -> None:
+    viewer = _viewer()
+    viewer.load_series(_series())
+    escapes: list[bool] = []
+    viewer.escape_pressed.connect(lambda: escapes.append(True))
+    QTest.keyClick(viewer, Qt.Key.Key_Escape)
+    assert escapes == [True]
+
+
+def test_escape_with_a_tool_exits_the_tool_without_fullscreen(qapp) -> None:
+    viewer = _viewer()
+    viewer.load_series(_series())
+    escapes: list[bool] = []
+    viewer.escape_pressed.connect(lambda: escapes.append(True))
+    viewer.set_measure_mode(MeasurementKind.DISTANCE)
+    QTest.keyClick(viewer, Qt.Key.Key_Escape)
+    assert viewer.measure_mode is None
+    assert escapes == []
+
+
+def test_decode_failure_shows_a_friendly_error_without_crashing(qapp) -> None:
     decoder = FakePixelDecoder(error=UnsupportedPixelFormatError("unsupported pixels"))
     viewer = _viewer(decoder=decoder)
     viewer.load_series(_series())
     assert viewer.has_image
     assert viewer._qimage is None
-    assert "unsupported pixels" in (viewer._last_error or "")
+    assert viewer._last_error == "This image could not be decoded."
 
 
 def test_decode_cache_stays_bounded(qapp) -> None:

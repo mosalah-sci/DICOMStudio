@@ -18,3 +18,9 @@ show_measurement_overlay = true
 
 [measurements]
 color = "#22d3ee"
+
+[workspace]
+study_explorer_visible = true
+metadata_visible = true
+study_explorer_width = 260
+metadata_width = 300

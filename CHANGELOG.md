@@ -5,6 +5,38 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.1.0] - 2026-08-15
+
+### Added
+
+- **Workspace persistence** — the sidebar visibility and widths are now
+  remembered between sessions via a new `[workspace]` settings section, applied
+  on every launch and saved on close.
+- **Drag & drop loading** — a folder or a DICOM file can be dropped anywhere on
+  the window; a file is loaded by scanning its containing folder. Dropping
+  reuses the exact same scan pipeline as the Open Folder action.
+- **Fullscreen viewer mode** — F11 hides the menu bar, toolbar, status bar and
+  sidebars to maximize the image area and restores their previous visibility on
+  exit; Esc (or F11) leaves fullscreen. Closing the window while fullscreen
+  never records the temporary hidden state.
+- **Viewer keyboard shortcuts** — F fits to window, R resets the view, W resets
+  the window/level and M toggles the distance measurement; Esc exits the active
+  measurement tool before being forwarded to exit fullscreen.
+- **Scan progress feedback** — the status bar reports the running scan count,
+  the scanning state names the folder being scanned, and the completion message
+  includes patients/studies/series plus any ignored invalid files.
+- **Empty state & onboarding** — the welcome screen now includes guidance text
+  and an "Open Folder…" button wired to the Open Folder dialog.
+- **Tooltips & extra shortcut** — toolbar/menu actions carry descriptive
+  tooltips, and Export Image also responds to Ctrl+E (in addition to Ctrl+S).
+
+### Changed
+
+- The Open Folder / drag & drop / command-line loading paths all go through one
+  scan pipeline, so behaviour is identical everywhere.
+- Decode failures show a friendly, consistent message in the viewer instead of
+  exposing raw error text.
+
 ## [1.0.1] - 2026-08-07
 
 ### Changed

@@ -83,15 +83,21 @@ _IMAGE_TAGS = {
 class PydicomStudyScanner:
     """Scans folders recursively and groups DICOM instances into a study tree."""
 
+    # Report progress at most once every N candidate files so a callback that
+    # crosses a thread boundary does not flood the receiver on huge folders.
+    _PROGRESS_INTERVAL = 10
+
     def scan(
         self,
         folder: Path,
         should_cancel: Callable[[], bool] | None = None,
+        on_progress: Callable[[int, int], None] | None = None,
     ) -> StudyTree:
         """Scan ``folder`` and return the discovered study tree.
 
         Files that are not DICOM, cannot be read, or lack the grouping tags
-        are skipped and counted as invalid.
+        are skipped and counted as invalid. ``on_progress`` is invoked with
+        ``(scanned, invalid)`` counts at a throttled cadence.
         """
         folder = Path(folder)
         if not folder.is_dir():
@@ -114,8 +120,13 @@ class PydicomStudyScanner:
                 instance = self._parse_instance(path)
                 if instance is None:
                     invalid_files += 1
-                    continue
-                self._accumulate(patients, instance)
+                else:
+                    self._accumulate(patients, instance)
+                if on_progress is not None and scanned % self._PROGRESS_INTERVAL == 0:
+                    on_progress(scanned, invalid_files)
+
+        if on_progress is not None:
+            on_progress(scanned, invalid_files)
 
         logger.info(
             "Scan of {} complete: {} files, {} invalid, {} patients",

@@ -78,6 +78,18 @@ def test_shortcuts_are_registered(catalog: ActionCatalog) -> None:
     assert catalog.action(ActionId.OPEN_FOLDER).shortcut().toString() == "Ctrl+O"
 
 
+def test_export_image_accepts_both_ctrl_s_and_ctrl_e(catalog: ActionCatalog) -> None:
+    shortcuts = [s.toString() for s in catalog.action(ActionId.EXPORT_IMAGE).shortcuts()]
+    assert "Ctrl+S" in shortcuts
+    assert "Ctrl+E" in shortcuts
+
+
+def test_actions_have_tooltips(catalog: ActionCatalog) -> None:
+    assert "Ctrl+O" in catalog.action(ActionId.OPEN_FOLDER).toolTip()
+    assert catalog.action(ActionId.TOGGLE_STUDY_EXPLORER).toolTip() != ""
+    assert catalog.action(ActionId.MEASURE).toolTip() != ""
+
+
 def test_dock_toggles_are_checkable(catalog: ActionCatalog) -> None:
     assert catalog.action(ActionId.TOGGLE_STUDY_EXPLORER).isCheckable()
     assert not catalog.action(ActionId.SETTINGS).isCheckable()

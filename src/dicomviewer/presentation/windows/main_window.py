@@ -2,13 +2,23 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 
 from loguru import logger
-from PySide6.QtCore import QByteArray, QObject, QStandardPaths, Qt, QThread, Signal, Slot
-from PySide6.QtGui import QAction, QCloseEvent
+from PySide6.QtCore import (
+    QByteArray,
+    QMimeData,
+    QObject,
+    QStandardPaths,
+    Qt,
+    QThread,
+    Signal,
+    Slot,
+)
+from PySide6.QtGui import QAction, QCloseEvent, QDragEnterEvent, QDragMoveEvent, QDropEvent
 from PySide6.QtWidgets import (
     QApplication,
     QDockWidget,
@@ -38,6 +48,7 @@ from dicomviewer.domain.settings import (
     Settings,
     SettingsError,
     ViewingSettings,
+    WorkspaceSettings,
 )
 from dicomviewer.domain.studies import Series, StudyTree
 from dicomviewer.presentation.actions.action_catalog import ActionCatalog
@@ -72,6 +83,7 @@ class _ScanRelay(QObject):
     the generation/folder of one scan, and re-emits with those values.
     """
 
+    progress = Signal(int, int, int, str)  # generation, scanned, invalid, folder
     finished = Signal(int, Path, object)  # generation, folder, StudyTree
     failed = Signal(int, str)
 
@@ -80,6 +92,11 @@ class _ScanRelay(QObject):
         super().__init__(parent)
         self._generation = generation
         self._folder = folder
+
+    @Slot(int, int)
+    def on_progress(self, scanned: int, invalid: int) -> None:
+        """Forward throttled progress counts to the main thread."""
+        self.progress.emit(self._generation, scanned, invalid, str(self._folder))
 
     @Slot(object)
     def on_finished(self, tree: StudyTree) -> None:
@@ -142,10 +159,13 @@ class MainWindow(QMainWindow):
         self._preset_actions: tuple[QAction, ...] = ()
         self._recent_menu: QMenu | None = None
         self._error_presenter = error_presenter or ErrorPresenter()
+        self._suppress_dock_signals = False
+        self._fullscreen_chrome: dict[QWidget, bool] = {}
 
         self.setWindowTitle(f"{app_name} - v{version}")
         self.setMinimumSize(960, 600)
         self.resize(1280, 800)
+        self.setAcceptDrops(True)
 
         self._build_workspace()
         self._catalog = self._build_catalog()
@@ -158,12 +178,14 @@ class MainWindow(QMainWindow):
             on_window_preset=self._apply_window_preset,
             on_clear_measurements=self._clear_measurements,
         )
-        self.addToolBar(create_toolbar(self, self._catalog))
+        self._toolbar = create_toolbar(self, self._catalog)
+        self.addToolBar(self._toolbar)
         self._build_recent_folders_menu()
         self._apply_viewing_preferences()
 
         self._capture_default_layout()
         self._restore_persisted_layout()
+        self._apply_workspace_settings()
         self._sync_dock_toggles()
         self._sync_viewer_actions(self._viewer_panel.has_image)
         theme_name = self._theme_controller.current_theme
@@ -173,6 +195,7 @@ class MainWindow(QMainWindow):
         """Stop any running scan and persist the window layout on close."""
         self._stop_scan()
         self._save_window_state()
+        self._persist_workspace_settings()
         super().closeEvent(event)
 
     def action(self, action_id: ActionId) -> QAction:
@@ -221,6 +244,8 @@ class MainWindow(QMainWindow):
         self._viewer_panel.slice_changed.connect(self._on_slice_changed)
         self._viewer_panel.measurements_changed.connect(self._on_measurements_changed)
         self._viewer_panel.measure_mode_changed.connect(self._sync_measure_action)
+        self._viewer_panel.open_folder_requested.connect(self._open_folder)
+        self._viewer_panel.escape_pressed.connect(self._on_viewer_escape)
         self.setCentralWidget(self._viewer_panel)
 
         self._study_explorer_panel = StudyExplorerPanel(
@@ -281,6 +306,47 @@ class MainWindow(QMainWindow):
             logger.warning("Ignoring incompatible dock layout; using the default layout.")
             self._restore_default_layout()
 
+    def _apply_workspace_settings(self) -> None:
+        """Restore sidebar visibility and widths from the typed settings.
+
+        The typed settings are the source of truth for the sidebars, so a
+        value persisted here overrides whatever the opaque Qt dock state
+        recorded. Dock-visibility signals are suppressed while applying so
+        the View/Window menu toggles never flash.
+        """
+        workspace = self._settings_manager.current_settings.workspace
+        self._suppress_dock_signals = True
+        try:
+            self._study_explorer_dock.setVisible(workspace.study_explorer_visible)
+            self._metadata_dock.setVisible(workspace.metadata_visible)
+            self.resizeDocks(
+                [self._study_explorer_dock, self._metadata_dock],
+                [workspace.study_explorer_width, workspace.metadata_width],
+                Qt.Orientation.Horizontal,
+            )
+        finally:
+            self._suppress_dock_signals = False
+        self._sync_dock_toggles()
+
+    def _persist_workspace_settings(self) -> None:
+        """Save the current sidebar visibility and widths to the settings."""
+        # Prefer the pre-fullscreen snapshot so closing the window while in
+        # fullscreen never records the temporary hidden state.
+        chrome = self._fullscreen_chrome
+        workspace = WorkspaceSettings(
+            study_explorer_visible=chrome.get(
+                self._study_explorer_dock, self._study_explorer_dock.isVisible()
+            ),
+            metadata_visible=chrome.get(self._metadata_dock, self._metadata_dock.isVisible()),
+            study_explorer_width=self._study_explorer_dock.width(),
+            metadata_width=self._metadata_dock.width(),
+        )
+        updated = replace(self._settings_manager.current_settings, workspace=workspace)
+        try:
+            self._settings_manager.update(updated)
+        except SettingsError as exc:
+            logger.warning("Could not persist the workspace layout: {}", exc)
+
     def _save_window_state(self) -> None:
         """Serialize geometry and dock layout to the window state store."""
         state = WindowState(
@@ -313,7 +379,7 @@ class MainWindow(QMainWindow):
                 detail=str(exc),
             )
         self._refresh_recent_menu()
-        self._study_explorer_panel.show_scanning()
+        self._study_explorer_panel.show_scanning(folder)
         self._metadata_panel.show_initial()
         self._status_bar.showMessage(f"Scanning {folder}…")
 
@@ -323,12 +389,14 @@ class MainWindow(QMainWindow):
         thread.setObjectName("study-scan")
         worker.moveToThread(thread)
         thread.started.connect(worker.run)
+        worker.progress.connect(relay.on_progress)
         worker.finished.connect(relay.on_finished)
         worker.failed.connect(relay.on_failed)
         worker.finished.connect(worker.deleteLater)
         worker.failed.connect(worker.deleteLater)
         worker.finished.connect(thread.quit)
         worker.failed.connect(thread.quit)
+        relay.progress.connect(self._on_scan_progress)
         relay.finished.connect(self._on_scan_finished)
         relay.failed.connect(self._on_scan_failed)
         thread.finished.connect(self._on_scan_thread_finished)
@@ -359,6 +427,13 @@ class MainWindow(QMainWindow):
             self._scan_relay = None
         thread.deleteLater()
 
+    def _on_scan_progress(self, generation: int, scanned: int, invalid: int, folder: str) -> None:
+        """Keep the user informed while a scan is in progress."""
+        del invalid
+        if generation != self._scan_generation:
+            return
+        self._status_bar.showMessage(f"Scanning {folder}… {scanned} files")
+
     def _on_scan_finished(self, generation: int, folder: Path, tree: StudyTree) -> None:
         """Populate the study explorer and report the scan outcome.
 
@@ -370,16 +445,17 @@ class MainWindow(QMainWindow):
             return
         self._study_explorer_panel.set_study_tree(tree)
         if not tree.has_content():
-            self._status_bar.showMessage("No DICOM studies found.")
+            self._status_bar.showMessage(f"No DICOM studies found in {folder}.")
             return
         if not self._study_explorer_dock.isVisible():
             self._study_explorer_dock.setVisible(True)
         message = (
-            f"Loaded {tree.patient_count} patients, {tree.study_count} studies, "
+            f"Scan complete: {tree.patient_count} patients, {tree.study_count} studies, "
             f"{tree.series_count} series."
         )
         if tree.invalid_files:
-            message += f" {tree.invalid_files} invalid files ignored."
+            suffix = "" if tree.invalid_files == 1 else "s"
+            message += f" {tree.invalid_files} invalid file{suffix} ignored."
         self._status_bar.showMessage(message)
 
     def _on_scan_failed(self, generation: int, message: str) -> None:
@@ -545,6 +621,8 @@ class MainWindow(QMainWindow):
 
     def _on_dock_visibility_changed(self, visible: bool) -> None:
         """Keep the View/Window menu toggles in sync with the docks."""
+        if self._suppress_dock_signals:
+            return
         sender = self.sender()
         if sender is self._study_explorer_dock:
             self._catalog.action(ActionId.TOGGLE_STUDY_EXPLORER).setChecked(visible)
@@ -689,6 +767,57 @@ class MainWindow(QMainWindow):
         elif path.is_file():
             self._start_scan(path.parent)
 
+    def dragEnterEvent(self, event: QDragEnterEvent) -> None:  # noqa: N802
+        """Accept drags that carry at least one existing file or folder path."""
+        if self._droppable_paths(event.mimeData()):
+            event.acceptProposedAction()
+
+    def dragMoveEvent(self, event: QDragMoveEvent) -> None:  # noqa: N802
+        """Keep accepting file and folder drags over the whole window."""
+        if self._droppable_paths(event.mimeData()):
+            event.acceptProposedAction()
+
+    def dropEvent(self, event: QDropEvent) -> None:  # noqa: N802
+        """Start the existing loading pipeline for the dropped paths."""
+        paths = self._droppable_paths(event.mimeData())
+        if not paths:
+            return
+        self._handle_dropped_paths(paths)
+        event.acceptProposedAction()
+
+    def _droppable_paths(self, mime: QMimeData | None) -> list[Path]:
+        """Return the existing local file/folder paths carried by ``mime``."""
+        if mime is None or not mime.hasUrls():
+            return []
+        paths: list[Path] = []
+        for url in mime.urls():
+            if not url.isLocalFile():
+                continue
+            path = Path(url.toLocalFile())
+            if path.exists():
+                paths.append(path)
+        return paths
+
+    def _handle_dropped_paths(self, paths: Sequence[Path]) -> None:
+        """Load a dropped folder, or a dropped file's containing folder.
+
+        Reuses the exact same scan pipeline as the Open Folder action and the
+        command line, so there is exactly one loading system.
+        """
+        folders = [path for path in paths if path.is_dir()]
+        if folders:
+            self._start_scan(folders[0])
+            return
+        files = [path for path in paths if path.is_file()]
+        if files:
+            self._start_scan(files[0].parent)
+
+    def _on_viewer_escape(self) -> None:
+        """Exit fullscreen when Esc is pressed outside a tool."""
+        if self.isFullScreen():
+            self._exit_fullscreen()
+            self._catalog.action(ActionId.FULLSCREEN).setChecked(False)
+
     def _change_theme(self, theme_name: str) -> None:
         """Switch the theme, refresh icons and update the status bar."""
         try:
@@ -721,11 +850,49 @@ class MainWindow(QMainWindow):
         self._metadata_dock.setVisible(checked)
 
     def _toggle_fullscreen(self) -> None:
-        """Toggle between fullscreen and normal window state."""
+        """Toggle fullscreen viewer mode.
+
+        In fullscreen the menu bar, toolbar, status bar and sidebars are
+        hidden to maximize the image area; the previous visibility of every
+        element is restored on exit. Viewer state is untouched throughout.
+        """
         if self.isFullScreen():
-            self.showNormal()
+            self._exit_fullscreen()
         else:
-            self.showFullScreen()
+            self._enter_fullscreen()
+        self._catalog.action(ActionId.FULLSCREEN).setChecked(self.isFullScreen())
+
+    def _enter_fullscreen(self) -> None:
+        """Remember the chrome visibility, hide it and enter fullscreen."""
+        self._fullscreen_chrome = {
+            self.menuBar(): self.menuBar().isVisible(),
+            self._toolbar: self._toolbar.isVisible(),
+            self.statusBar(): self.statusBar().isVisible(),
+            self._study_explorer_dock: self._study_explorer_dock.isVisible(),
+            self._metadata_dock: self._metadata_dock.isVisible(),
+        }
+        self._set_chrome_visible(False)
+        self.showFullScreen()
+
+    def _exit_fullscreen(self) -> None:
+        """Leave fullscreen and restore the previously visible chrome."""
+        self.showNormal()
+        self._set_chrome_visible(True)
+        self._fullscreen_chrome = {}
+
+    def _set_chrome_visible(self, visible: bool) -> None:
+        """Show or hide the window chrome and sidebars.
+
+        Dock-visibility signals are suppressed while this runs so the
+        View/Window menu toggles keep reflecting the user's actual preference
+        instead of the temporary fullscreen state.
+        """
+        self._suppress_dock_signals = True
+        try:
+            for widget in self._fullscreen_chrome:
+                widget.setVisible(visible and self._fullscreen_chrome[widget])
+        finally:
+            self._suppress_dock_signals = False
 
     def _exit_application(self) -> None:
         """Close the window, quitting the application."""

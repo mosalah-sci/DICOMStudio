@@ -15,9 +15,11 @@ class StudyScanWorker(QObject):
 
     The worker is moved to a :class:`QThread` by its owner. On completion the
     owner must quit and recycle the thread; the worker emits one terminal
-    signal per run.
+    signal per run. Progress is reported with the scanned/invalid file counts
+    so the UI can keep the user informed without blocking.
     """
 
+    progress = Signal(int, int)  # files scanned, files invalid
     finished = Signal(object)  # StudyTree
     failed = Signal(str)
 
@@ -31,7 +33,7 @@ class StudyScanWorker(QObject):
     def run(self) -> None:
         """Execute the scan and emit the outcome."""
         try:
-            tree = self._scanner.scan(self._folder)
+            tree = self._scanner.scan(self._folder, on_progress=self._on_progress)
         except DiscoveryError as exc:
             self.failed.emit(str(exc))
             return
@@ -43,3 +45,7 @@ class StudyScanWorker(QObject):
             self.failed.emit(f"Scan error: {exc}")
             return
         self.finished.emit(tree)
+
+    def _on_progress(self, scanned: int, invalid: int) -> None:
+        """Forward throttled progress counts to the UI thread."""
+        self.progress.emit(scanned, invalid)

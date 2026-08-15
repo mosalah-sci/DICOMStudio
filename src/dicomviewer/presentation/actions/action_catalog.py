@@ -20,6 +20,8 @@ class ActionSpec:
     text: str
     icon: str | None = None
     shortcut: str | None = None
+    additional_shortcuts: tuple[str, ...] = ()
+    tooltip: str | None = None
     status_tip: str | None = None
     checkable: bool = False
     enabled: bool = True
@@ -31,6 +33,7 @@ _SPECS: tuple[ActionSpec, ...] = (
         "&Open Folder...",
         icon="folder",
         shortcut="Ctrl+O",
+        tooltip="Open a folder of DICOM studies (Ctrl+O)",
         status_tip="Open a folder of DICOM studies",
     ),
     ActionSpec(
@@ -38,6 +41,7 @@ _SPECS: tuple[ActionSpec, ...] = (
         "Open &Files...",
         icon="folder-plus",
         shortcut="Ctrl+Shift+O",
+        tooltip="Open individual DICOM files (Ctrl+Shift+O)",
         status_tip="Open individual DICOM files",
         enabled=False,
     ),
@@ -46,6 +50,8 @@ _SPECS: tuple[ActionSpec, ...] = (
         "&Export Image...",
         icon="save",
         shortcut="Ctrl+S",
+        additional_shortcuts=("Ctrl+E",),
+        tooltip="Export the current view as a PNG or JPEG image (Ctrl+E)",
         status_tip="Export the current view as a PNG or JPEG image",
     ),
     ActionSpec(
@@ -53,6 +59,7 @@ _SPECS: tuple[ActionSpec, ...] = (
         "&Fit to Window",
         icon="maximize",
         shortcut="Ctrl+0",
+        tooltip="Fit the image to the viewer (F)",
         status_tip="Fit the image to the viewer",
     ),
     ActionSpec(
@@ -60,6 +67,7 @@ _SPECS: tuple[ActionSpec, ...] = (
         "Zoom &In",
         icon="zoom-in",
         shortcut="+",
+        tooltip="Zoom in (Ctrl+wheel also zooms)",
         status_tip="Zoom in (Ctrl+wheel also zooms)",
     ),
     ActionSpec(
@@ -67,24 +75,28 @@ _SPECS: tuple[ActionSpec, ...] = (
         "Zoom &Out",
         icon="zoom-out",
         shortcut="-",
+        tooltip="Zoom out (Ctrl+wheel also zooms)",
         status_tip="Zoom out (Ctrl+wheel also zooms)",
     ),
     ActionSpec(
         ActionId.RESET_VIEW,
         "&Reset View",
         icon="rotate-ccw",
+        tooltip="Reset zoom, pan and window/level (R)",
         status_tip="Reset zoom, pan and window/level",
     ),
     ActionSpec(
         ActionId.WINDOW_LEVEL,
         "Reset &Window/Level",
         icon="target",
+        tooltip="Reset the window/level to automatic (W, or right-drag to adjust)",
         status_tip="Reset the window/level to automatic (right-drag adjusts it)",
     ),
     ActionSpec(
         ActionId.MEASURE,
         "&Measure",
         icon="ruler",
+        tooltip="Measure distances and angles on the image (M)",
         status_tip="Measure distances and angles on the image",
         checkable=True,
     ),
@@ -92,6 +104,7 @@ _SPECS: tuple[ActionSpec, ...] = (
         ActionId.CLEAR_MEASUREMENTS,
         "&Clear Measurements",
         icon="eraser",
+        tooltip="Remove all measurements from every slice",
         status_tip="Remove all measurements from every slice",
         enabled=False,
     ),
@@ -100,12 +113,14 @@ _SPECS: tuple[ActionSpec, ...] = (
         "&Copy Image to Clipboard",
         icon="copy",
         shortcut="Ctrl+C",
+        tooltip="Copy the current view to the clipboard (Ctrl+C)",
         status_tip="Copy the current view to the clipboard",
     ),
     ActionSpec(
         ActionId.SCREENSHOT,
         "&Screenshot",
         icon="camera",
+        tooltip="Save a PNG screenshot of the current view",
         status_tip="Save a PNG screenshot of the current view",
     ),
     ActionSpec(
@@ -113,12 +128,14 @@ _SPECS: tuple[ActionSpec, ...] = (
         "&Settings...",
         icon="sliders",
         shortcut="Ctrl+,",
+        tooltip="Open the settings dialog (Ctrl+,)",
         status_tip="Open the settings dialog",
     ),
     ActionSpec(
         ActionId.TOGGLE_STUDY_EXPLORER,
         "Study &Explorer",
         icon="panel-left",
+        tooltip="Show or hide the Study Explorer sidebar",
         status_tip="Show or hide the study explorer",
         checkable=True,
     ),
@@ -126,6 +143,7 @@ _SPECS: tuple[ActionSpec, ...] = (
         ActionId.TOGGLE_METADATA,
         "&Metadata Panel",
         icon="panel-right",
+        tooltip="Show or hide the Metadata sidebar",
         status_tip="Show or hide the metadata panel",
         checkable=True,
     ),
@@ -133,6 +151,7 @@ _SPECS: tuple[ActionSpec, ...] = (
         ActionId.RESTORE_LAYOUT,
         "Restore &Default Layout",
         icon="maximize",
+        tooltip="Restore the default window layout",
         status_tip="Restore the default window layout",
     ),
     ActionSpec(
@@ -140,6 +159,7 @@ _SPECS: tuple[ActionSpec, ...] = (
         "&Fullscreen",
         icon="maximize-2",
         shortcut="F11",
+        tooltip="Toggle fullscreen viewer mode (F11, Esc to exit)",
         status_tip="Toggle fullscreen mode",
         checkable=True,
     ),
@@ -147,12 +167,14 @@ _SPECS: tuple[ActionSpec, ...] = (
         ActionId.ABOUT,
         "&About...",
         icon="info",
+        tooltip="Show application information",
         status_tip="Show application information",
     ),
     ActionSpec(
         ActionId.EXIT,
         "E&xit",
         shortcut="Ctrl+Q",
+        tooltip="Quit the application (Ctrl+Q)",
         status_tip="Quit the application",
     ),
 )
@@ -207,7 +229,11 @@ class ActionCatalog:
             action.setIcon(self._icon_provider.icon(spec.icon))
             self._icon_names[spec.action_id] = spec.icon
         if spec.shortcut is not None:
-            action.setShortcut(QKeySequence(spec.shortcut))
+            shortcuts = [QKeySequence(spec.shortcut)]
+            shortcuts.extend(QKeySequence(extra) for extra in spec.additional_shortcuts)
+            action.setShortcuts(shortcuts)
+        if spec.tooltip is not None:
+            action.setToolTip(spec.tooltip)
         if spec.status_tip is not None:
             action.setStatusTip(spec.status_tip)
         if spec.checkable:

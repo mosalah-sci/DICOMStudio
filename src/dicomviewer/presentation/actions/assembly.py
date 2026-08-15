@@ -129,6 +129,9 @@ def create_toolbar(main_window: QMainWindow, catalog: ActionCatalog) -> QToolBar
     _add(toolbar, catalog, ActionId.MEASURE)
     _add(toolbar, catalog, ActionId.SCREENSHOT)
     toolbar.addSeparator()
+    _add(toolbar, catalog, ActionId.TOGGLE_STUDY_EXPLORER)
+    _add(toolbar, catalog, ActionId.TOGGLE_METADATA)
+    toolbar.addSeparator()
     _add(toolbar, catalog, ActionId.SETTINGS)
     return toolbar
 
