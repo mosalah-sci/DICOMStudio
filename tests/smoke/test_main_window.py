@@ -5,11 +5,10 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
-from PySide6.QtCore import QMimeData, QPoint, Qt, QUrl
+from PySide6.QtCore import QAbstractAnimation, QEasingCurve, QMimeData, QPoint, Qt, QUrl
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import (
     QApplication,
-    QDockWidget,
     QFileDialog,
     QLabel,
     QPushButton,
@@ -23,6 +22,12 @@ from dicomviewer.domain.measurement import MeasurementKind
 from dicomviewer.domain.settings import MeasurementSettings, ViewingSettings
 from dicomviewer.domain.studies import Image, Patient, Series, Study, StudyTree
 from dicomviewer.presentation.actions.action_ids import ActionId
+from dicomviewer.presentation.widgets.sidebar_drawer import (
+    DRAWER_ANIMATION_MS,
+    DRAWER_RAIL_WIDTH,
+    SidebarArrow,
+    SidebarDrawer,
+)
 from dicomviewer.presentation.windows.main_window import MainWindow
 from dicomviewer.shared.constants import APP_NAME, __version__
 from tests.dicom_utils import FakeImageExporter, FakeStudyScanner
@@ -68,24 +73,35 @@ def test_empty_viewer_state_offers_an_open_folder_action(
     assert opened == [["Open DICOM Folder"]]
 
 
-def test_main_window_has_menus_and_docks(make_window: Callable[..., MainWindow]) -> None:
+def test_main_window_has_menus_and_drawers(make_window: Callable[..., MainWindow]) -> None:
     window = make_window()
     assert window.menuBar() is not None
-    assert window.findChild(QDockWidget, "studyExplorerDock") is not None
-    assert window.findChild(QDockWidget, "metadataDock") is not None
+    explorer = window.findChild(SidebarDrawer, "sidebarDrawer")
+    assert explorer is not None
     assert window.statusBar() is not None
+    assert window._study_explorer_drawer.is_open
+    assert window._metadata_drawer.is_open
 
 
-def test_dock_toggle_action_shows_and_hides_the_panel(
+def test_drawer_toggle_action_opens_and_collapses_the_drawer(
     make_window: Callable[..., MainWindow],
+    qapp: QApplication,
 ) -> None:
     window = make_window()
-    dock = window.findChild(QDockWidget, "studyExplorerDock")
+    _show_window(qapp, window)
+    drawer = window._study_explorer_drawer
     toggle = window.action(ActionId.TOGGLE_STUDY_EXPLORER)
-    assert dock is not None
-    toggle.setChecked(False)
+    assert drawer.is_open
     toggle.trigger()
-    assert not dock.isVisible()
+    qapp.processEvents()
+    assert not drawer.is_open
+    assert not toggle.isChecked()
+    toggle.trigger()
+    qapp.processEvents()
+    assert drawer.is_open
+    assert toggle.isChecked()
+    window.close()
+    qapp.processEvents()
 
 
 def test_unavailable_actions_are_disabled(make_window: Callable[..., MainWindow]) -> None:
@@ -608,7 +624,7 @@ def test_scanning_state_mentions_the_folder(
     # The scanning state is shown synchronously; the worker only finishes
     # once we return to the event loop.
     assert panel._stack.currentIndex() == 1
-    assert str(folder) in panel._scanning_state._description_label.text()
+    assert str(folder) in panel._scanning_state._label.text()
     assert pump_until(qapp, lambda: panel._stack.currentIndex() == 3)
     assert pump_until(
         qapp, lambda: (window._scan_thread is None or not window._scan_thread.isRunning())
@@ -707,17 +723,17 @@ def test_entering_fullscreen_hides_the_chrome_and_escape_exits(
 ) -> None:
     window = make_window()
     _show_window(qapp, window)
-    assert window._study_explorer_dock.isVisible()
+    assert window._study_explorer_drawer.isVisible()
     window._enter_fullscreen()
     assert window.isFullScreen()
     assert not window.menuBar().isVisible()
     assert not window._toolbar.isVisible()
-    assert not window._study_explorer_dock.isVisible()
-    assert not window._metadata_dock.isVisible()
+    assert not window._study_explorer_drawer.isVisible()
+    assert not window._metadata_drawer.isVisible()
     window._on_viewer_escape()
     assert not window.isFullScreen()
-    assert window._study_explorer_dock.isVisible()
-    assert window._metadata_dock.isVisible()
+    assert window._study_explorer_drawer.isVisible()
+    assert window._metadata_drawer.isVisible()
     assert window._fullscreen_chrome == {}
     window.close()
     qapp.processEvents()
@@ -730,13 +746,13 @@ def test_fullscreen_restores_previously_hidden_chrome(
     window = make_window()
     _show_window(qapp, window)
     window._toolbar.setVisible(False)
-    window._study_explorer_dock.setVisible(False)
+    window._study_explorer_drawer.set_open(False, animate=False)
     qapp.processEvents()
     window._enter_fullscreen()
     window._exit_fullscreen()
     assert not window._toolbar.isVisible()
-    assert not window._study_explorer_dock.isVisible()
-    assert window._metadata_dock.isVisible()
+    assert not window._study_explorer_drawer.is_open
+    assert window._metadata_drawer.is_open
     window.close()
     qapp.processEvents()
 
@@ -747,16 +763,16 @@ def test_workspace_settings_are_persisted_and_restored(
 ) -> None:
     first = make_window()
     _show_window(qapp, first)
-    first._study_explorer_dock.setVisible(False)
-    first._metadata_dock.setVisible(False)
+    first._study_explorer_drawer.set_open(False, animate=False)
+    first._metadata_drawer.set_open(False, animate=False)
     qapp.processEvents()
     first.close()
     qapp.processEvents()
 
     restored = make_window()
     restored._apply_workspace_settings()
-    assert not restored._study_explorer_dock.isVisible()
-    assert not restored._metadata_dock.isVisible()
+    assert not restored._study_explorer_drawer.is_open
+    assert not restored._metadata_drawer.is_open
     assert not restored.action(ActionId.TOGGLE_STUDY_EXPLORER).isChecked()
     assert not restored.action(ActionId.TOGGLE_METADATA).isChecked()
     restored.close()
@@ -770,7 +786,7 @@ def test_workspace_persistence_round_trips_through_settings_file(
 ) -> None:
     first = make_window()
     _show_window(qapp, first)
-    first._study_explorer_dock.setVisible(False)
+    first._study_explorer_drawer.set_open(False, animate=False)
     qapp.processEvents()
     first.close()
     qapp.processEvents()
@@ -782,7 +798,212 @@ def test_workspace_persistence_round_trips_through_settings_file(
     restored = make_window()
     restored._apply_workspace_settings()
     _show_window(qapp, restored)
-    assert not restored._study_explorer_dock.isVisible()
-    assert restored._metadata_dock.isVisible()
+    assert not restored._study_explorer_drawer.is_open
+    assert restored._metadata_drawer.is_open
     restored.close()
+    qapp.processEvents()
+
+
+def test_sidebar_empty_states_are_minimal_single_line_notes(make_window) -> None:
+    window = make_window()
+    explorer = window._study_explorer_panel
+    assert explorer._stack.currentIndex() == 0
+    notes = explorer._stack.findChildren(QLabel)
+    # Only the muted one-liner, no onboarding copy or description paragraphs.
+    assert any("No studies loaded" == label.text() for label in notes)
+    assert not any("Open a folder to browse" in label.text() for label in notes)
+
+    metadata = window._metadata_panel
+    assert metadata._stack.currentIndex() == 0
+    notes = metadata._stack.findChildren(QLabel)
+    assert any("No metadata selected" == label.text() for label in notes)
+    assert not any("Select a series" in label.text() for label in notes)
+
+
+def test_main_toolbar_has_no_sidebar_toggle_buttons(make_window) -> None:
+    window = make_window()
+    toolbar_action_ids = {action.objectName() for action in window._toolbar.actions()}
+    assert ActionId.TOGGLE_STUDY_EXPLORER.value not in toolbar_action_ids
+    assert ActionId.TOGGLE_METADATA.value not in toolbar_action_ids
+
+
+def test_each_drawer_owns_one_integrated_arrow_control(make_window) -> None:
+    window = make_window()
+    for drawer in (window._study_explorer_drawer, window._metadata_drawer):
+        arrows = drawer.findChildren(SidebarArrow)
+        assert len(arrows) == 1
+        arrow = arrows[0]
+        assert arrow.toolTip() != ""
+        assert arrow.objectName() == "drawerRail"
+
+
+def test_left_arrow_collapses_the_drawer_and_leaves_a_slim_rail(
+    make_window: Callable[..., MainWindow],
+    qapp: QApplication,
+) -> None:
+    window = make_window()
+    _show_window(qapp, window)
+    drawer = window._study_explorer_drawer
+    arrow = drawer.findChild(SidebarArrow)
+    assert arrow is not None
+    viewer_before = window._viewer_panel.width()
+    arrow.clicked.emit()
+    qapp.processEvents()
+    assert not drawer.is_open
+    assert not window.action(ActionId.TOGGLE_STUDY_EXPLORER).isChecked()
+    assert pump_until(
+        qapp,
+        lambda: drawer._animation.state() == QAbstractAnimation.State.Stopped,
+    )
+    assert drawer.width() == DRAWER_RAIL_WIDTH
+    assert drawer._content.isHidden()
+    assert window._viewer_panel.width() > viewer_before
+    window.close()
+    qapp.processEvents()
+
+
+def test_right_arrow_reopens_a_collapsed_drawer(
+    make_window: Callable[..., MainWindow],
+    qapp: QApplication,
+) -> None:
+    window = make_window()
+    _show_window(qapp, window)
+    drawer = window._metadata_drawer
+    drawer.set_open(False, animate=False)
+    qapp.processEvents()
+    assert not drawer.is_open
+    assert not window.action(ActionId.TOGGLE_METADATA).isChecked()
+
+    arrow = drawer.findChild(SidebarArrow)
+    assert arrow is not None
+    arrow.clicked.emit()
+    qapp.processEvents()
+    assert drawer.is_open
+    assert window.action(ActionId.TOGGLE_METADATA).isChecked()
+    assert pump_until(
+        qapp,
+        lambda: drawer._animation.state() == QAbstractAnimation.State.Stopped,
+    )
+    assert drawer.width() == drawer.open_width
+    assert drawer._content.isVisible()
+    window.close()
+    qapp.processEvents()
+
+
+def test_arrow_points_at_the_drawer_motion(make_window) -> None:
+    window = make_window()
+    explorer_arrow = window._study_explorer_drawer.findChild(SidebarArrow)
+    metadata_arrow = window._metadata_drawer.findChild(SidebarArrow)
+    assert explorer_arrow is not None
+    assert metadata_arrow is not None
+    # Open left drawer collapses toward the left, so the arrow points left.
+    assert not explorer_arrow._arrow_right
+    # Open right drawer collapses toward the right, so the arrow points right.
+    assert metadata_arrow._arrow_right
+
+    window._study_explorer_drawer.set_open(False, animate=False)
+    window._metadata_drawer.set_open(False, animate=False)
+    # Collapsed drawers expand toward the viewer edge.
+    assert explorer_arrow._arrow_right
+    assert not metadata_arrow._arrow_right
+
+
+def test_drawer_animation_is_smooth_and_short(make_window) -> None:
+    window = make_window()
+    for drawer in (window._study_explorer_drawer, window._metadata_drawer):
+        assert drawer._animation.duration() == DRAWER_ANIMATION_MS
+        assert drawer._animation.easingCurve().type() == QEasingCurve.Type.OutCubic
+        assert drawer._animation.targetObject() is drawer
+
+
+def test_collapsing_drawers_releases_width_to_the_viewer(
+    make_window: Callable[..., MainWindow],
+    qapp: QApplication,
+) -> None:
+    window = make_window()
+    _show_window(qapp, window)
+    drawer = window._study_explorer_drawer
+    viewer_before = window._viewer_panel.width()
+    drawer.set_open(False, animate=False)
+    qapp.processEvents()
+    assert window._viewer_panel.width() > viewer_before
+    assert drawer.width() == DRAWER_RAIL_WIDTH
+    window.close()
+    qapp.processEvents()
+
+
+def test_both_drawers_collapsed_let_viewer_use_almost_full_width(
+    make_window: Callable[..., MainWindow],
+    qapp: QApplication,
+) -> None:
+    window = make_window()
+    _show_window(qapp, window)
+    window._study_explorer_drawer.set_open(False, animate=False)
+    window._metadata_drawer.set_open(False, animate=False)
+    qapp.processEvents()
+    central = window.centralWidget()
+    assert window._viewer_panel.width() >= central.width() - 2 * DRAWER_RAIL_WIDTH
+    assert window._study_explorer_drawer.width() == DRAWER_RAIL_WIDTH
+    assert window._metadata_drawer.width() == DRAWER_RAIL_WIDTH
+    window.close()
+    qapp.processEvents()
+
+
+def test_toggle_menu_actions_drive_the_drawers(
+    make_window: Callable[..., MainWindow],
+    qapp: QApplication,
+) -> None:
+    window = make_window()
+    _show_window(qapp, window)
+    toggle = window.action(ActionId.TOGGLE_STUDY_EXPLORER)
+    assert toggle.isChecked()
+    assert window._study_explorer_drawer.is_open
+    toggle.trigger()
+    qapp.processEvents()
+    assert not toggle.isChecked()
+    assert not window._study_explorer_drawer.is_open
+    window.close()
+    qapp.processEvents()
+
+
+def test_restore_layout_reopens_both_drawers(
+    make_window: Callable[..., MainWindow],
+    qapp: QApplication,
+) -> None:
+    window = make_window()
+    _show_window(qapp, window)
+    window._study_explorer_drawer.set_open(False, animate=False)
+    window._metadata_drawer.set_open(False, animate=False)
+    qapp.processEvents()
+    assert not window._study_explorer_drawer.is_open
+    assert not window._metadata_drawer.is_open
+    window._restore_default_layout()
+    qapp.processEvents()
+    assert window._study_explorer_drawer.is_open
+    assert window._metadata_drawer.is_open
+    assert window.action(ActionId.TOGGLE_STUDY_EXPLORER).isChecked()
+    assert window.action(ActionId.TOGGLE_METADATA).isChecked()
+    window.close()
+    qapp.processEvents()
+
+
+def test_clicking_the_arrow_runs_a_slide_animation(
+    make_window: Callable[..., MainWindow],
+    qapp: QApplication,
+) -> None:
+    window = make_window()
+    _show_window(qapp, window)
+    drawer = window._metadata_drawer
+    arrow = drawer.findChild(SidebarArrow)
+    assert arrow is not None
+    arrow.clicked.emit()
+    qapp.processEvents()
+    assert not drawer.is_open
+    assert drawer._animation.state() == QAbstractAnimation.State.Running
+    assert pump_until(
+        qapp,
+        lambda: drawer._animation.state() == QAbstractAnimation.State.Stopped,
+    )
+    assert drawer.width() == DRAWER_RAIL_WIDTH
+    window.close()
     qapp.processEvents()

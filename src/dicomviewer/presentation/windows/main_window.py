@@ -13,16 +13,21 @@ from PySide6.QtCore import (
     QMimeData,
     QObject,
     QStandardPaths,
-    Qt,
     QThread,
     Signal,
     Slot,
 )
-from PySide6.QtGui import QAction, QCloseEvent, QDragEnterEvent, QDragMoveEvent, QDropEvent
+from PySide6.QtGui import (
+    QAction,
+    QCloseEvent,
+    QDragEnterEvent,
+    QDragMoveEvent,
+    QDropEvent,
+)
 from PySide6.QtWidgets import (
     QApplication,
-    QDockWidget,
     QFileDialog,
+    QHBoxLayout,
     QMainWindow,
     QMenu,
     QWidget,
@@ -66,6 +71,7 @@ from dicomviewer.presentation.theme.icon_provider import IconProvider
 from dicomviewer.presentation.theme.theme_controller import ThemeController
 from dicomviewer.presentation.theme.themes import THEMES
 from dicomviewer.presentation.widgets.metadata_panel import MetadataPanel
+from dicomviewer.presentation.widgets.sidebar_drawer import SidebarDrawer
 from dicomviewer.presentation.widgets.status_bar import StatusBar
 from dicomviewer.presentation.widgets.study_explorer_panel import StudyExplorerPanel
 from dicomviewer.presentation.widgets.viewer_panel import ViewerPanel
@@ -159,7 +165,6 @@ class MainWindow(QMainWindow):
         self._preset_actions: tuple[QAction, ...] = ()
         self._recent_menu: QMenu | None = None
         self._error_presenter = error_presenter or ErrorPresenter()
-        self._suppress_dock_signals = False
         self._fullscreen_chrome: dict[QWidget, bool] = {}
 
         self.setWindowTitle(f"{app_name} - v{version}")
@@ -186,7 +191,7 @@ class MainWindow(QMainWindow):
         self._capture_default_layout()
         self._restore_persisted_layout()
         self._apply_workspace_settings()
-        self._sync_dock_toggles()
+        self._sync_sidebar_toggles()
         self._sync_viewer_actions(self._viewer_panel.has_image)
         theme_name = self._theme_controller.current_theme
         self._status_bar.set_theme(THEMES[theme_name].display_name)
@@ -230,7 +235,23 @@ class MainWindow(QMainWindow):
         )
 
     def _build_workspace(self) -> None:
-        """Create the central viewer and the two dockable side panels."""
+        """Create the central drawer workspace around the viewer.
+
+        The Study Explorer slides on the left and Metadata on the right, both
+        arranged in a single horizontal layout with the viewer between them so
+        the viewer naturally reclaims the space a drawer releases while it
+        slides.
+        """
+        self._study_explorer_panel = StudyExplorerPanel(
+            self, self._icon_provider, thumbnail_service=self._thumbnail_service
+        )
+        self._study_explorer_panel.series_activated.connect(self._on_series_activated)
+        self._metadata_panel = MetadataPanel(
+            self,
+            self._icon_provider,
+            metadata_service=self._metadata_service,
+        )
+
         self._viewer_panel = ViewerPanel(
             self,
             self._icon_provider,
@@ -246,56 +267,43 @@ class MainWindow(QMainWindow):
         self._viewer_panel.measure_mode_changed.connect(self._sync_measure_action)
         self._viewer_panel.open_folder_requested.connect(self._open_folder)
         self._viewer_panel.escape_pressed.connect(self._on_viewer_escape)
-        self.setCentralWidget(self._viewer_panel)
 
-        self._study_explorer_panel = StudyExplorerPanel(
-            self, self._icon_provider, thumbnail_service=self._thumbnail_service
-        )
-        self._study_explorer_panel.series_activated.connect(self._on_series_activated)
-        self._study_explorer_dock = self._create_dock(
-            "studyExplorerDock",
+        self._study_explorer_drawer = SidebarDrawer(
+            self,
             "Study Explorer",
             self._study_explorer_panel,
+            side="left",
+            open_width=SIDEBAR_WIDTHS["study_explorer"],
         )
-        self._metadata_panel = MetadataPanel(
+        self._study_explorer_drawer.open_changed.connect(self._sync_sidebar_toggles)
+        self._metadata_drawer = SidebarDrawer(
             self,
-            self._icon_provider,
-            metadata_service=self._metadata_service,
+            "Metadata",
+            self._metadata_panel,
+            side="right",
+            open_width=SIDEBAR_WIDTHS["metadata"],
         )
-        self._metadata_dock = self._create_dock("metadataDock", "Metadata", self._metadata_panel)
-        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self._study_explorer_dock)
-        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self._metadata_dock)
+        self._metadata_drawer.open_changed.connect(self._sync_sidebar_toggles)
 
-        self._study_explorer_dock.setMinimumWidth(SIDEBAR_WIDTHS["study_explorer"])
-        self._metadata_dock.setMinimumWidth(SIDEBAR_WIDTHS["metadata"])
-        self.resizeDocks(
-            [self._study_explorer_dock, self._metadata_dock],
-            [SIDEBAR_WIDTHS["study_explorer"], SIDEBAR_WIDTHS["metadata"]],
-            Qt.Orientation.Horizontal,
-        )
-
-    def _create_dock(self, object_name: str, title: str, widget: QWidget) -> QDockWidget:
-        """Create a closable, floatable, movable dock widget."""
-        dock = QDockWidget(title, self)
-        dock.setObjectName(object_name)
-        dock.setWidget(widget)
-        dock.setFeatures(
-            QDockWidget.DockWidgetFeature.DockWidgetClosable
-            | QDockWidget.DockWidgetFeature.DockWidgetMovable
-            | QDockWidget.DockWidgetFeature.DockWidgetFloatable
-        )
-        dock.visibilityChanged.connect(self._on_dock_visibility_changed)
-        return dock
+        workspace = QWidget(self)
+        workspace.setObjectName("workspaceContainer")
+        layout = QHBoxLayout(workspace)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        layout.addWidget(self._study_explorer_drawer)
+        layout.addWidget(self._viewer_panel, 1)
+        layout.addWidget(self._metadata_drawer)
+        self.setCentralWidget(workspace)
 
     def _capture_default_layout(self) -> None:
-        """Snapshot the default dock layout for later restoration."""
+        """Snapshot the default window layout for later restoration."""
         self._default_dock_state = self.saveState(_STATE_VERSION)
 
     def _restore_persisted_layout(self) -> None:
-        """Apply the saved geometry and dock layout, when one exists.
+        """Apply the saved geometry and window layout, when one exists.
 
         A layout that cannot be applied (incompatible or damaged) is replaced
-        with the default layout so both side panels stay visible and a loaded
+        with the default layout so both side drawers stay open and a loaded
         study can never be rendered inaccessible by a broken save.
         """
         state = self._window_state_store.load()
@@ -307,39 +315,26 @@ class MainWindow(QMainWindow):
             self._restore_default_layout()
 
     def _apply_workspace_settings(self) -> None:
-        """Restore sidebar visibility and widths from the typed settings.
+        """Restore sidebar open state and widths from the typed settings.
 
-        The typed settings are the source of truth for the sidebars, so a
-        value persisted here overrides whatever the opaque Qt dock state
-        recorded. Dock-visibility signals are suppressed while applying so
-        the View/Window menu toggles never flash.
+        The typed settings are the source of truth for the sidebars. Restoring
+        skips the slide animation so a persisted collapsed drawer starts
+        collapsed; the View/Window menu toggles are synced to match.
         """
         workspace = self._settings_manager.current_settings.workspace
-        self._suppress_dock_signals = True
-        try:
-            self._study_explorer_dock.setVisible(workspace.study_explorer_visible)
-            self._metadata_dock.setVisible(workspace.metadata_visible)
-            self.resizeDocks(
-                [self._study_explorer_dock, self._metadata_dock],
-                [workspace.study_explorer_width, workspace.metadata_width],
-                Qt.Orientation.Horizontal,
-            )
-        finally:
-            self._suppress_dock_signals = False
-        self._sync_dock_toggles()
+        self._study_explorer_drawer.set_open_width(workspace.study_explorer_width)
+        self._metadata_drawer.set_open_width(workspace.metadata_width)
+        self._study_explorer_drawer.set_open(workspace.study_explorer_visible, animate=False)
+        self._metadata_drawer.set_open(workspace.metadata_visible, animate=False)
+        self._sync_sidebar_toggles()
 
     def _persist_workspace_settings(self) -> None:
-        """Save the current sidebar visibility and widths to the settings."""
-        # Prefer the pre-fullscreen snapshot so closing the window while in
-        # fullscreen never records the temporary hidden state.
-        chrome = self._fullscreen_chrome
+        """Save the current sidebar open state and widths to the settings."""
         workspace = WorkspaceSettings(
-            study_explorer_visible=chrome.get(
-                self._study_explorer_dock, self._study_explorer_dock.isVisible()
-            ),
-            metadata_visible=chrome.get(self._metadata_dock, self._metadata_dock.isVisible()),
-            study_explorer_width=self._study_explorer_dock.width(),
-            metadata_width=self._metadata_dock.width(),
+            study_explorer_visible=self._study_explorer_drawer.is_open,
+            metadata_visible=self._metadata_drawer.is_open,
+            study_explorer_width=self._study_explorer_drawer.open_width,
+            metadata_width=self._metadata_drawer.open_width,
         )
         updated = replace(self._settings_manager.current_settings, workspace=workspace)
         try:
@@ -447,8 +442,8 @@ class MainWindow(QMainWindow):
         if not tree.has_content():
             self._status_bar.showMessage(f"No DICOM studies found in {folder}.")
             return
-        if not self._study_explorer_dock.isVisible():
-            self._study_explorer_dock.setVisible(True)
+        if not self._study_explorer_drawer.is_open:
+            self._study_explorer_drawer.set_open(True)
         message = (
             f"Scan complete: {tree.patient_count} patients, {tree.study_count} studies, "
             f"{tree.series_count} series."
@@ -619,22 +614,12 @@ class MainWindow(QMainWindow):
         else:
             self._status_bar.showMessage("Window/level: automatic")
 
-    def _on_dock_visibility_changed(self, visible: bool) -> None:
-        """Keep the View/Window menu toggles in sync with the docks."""
-        if self._suppress_dock_signals:
-            return
-        sender = self.sender()
-        if sender is self._study_explorer_dock:
-            self._catalog.action(ActionId.TOGGLE_STUDY_EXPLORER).setChecked(visible)
-        elif sender is self._metadata_dock:
-            self._catalog.action(ActionId.TOGGLE_METADATA).setChecked(visible)
-
-    def _sync_dock_toggles(self) -> None:
-        """Force the dock toggles to match the current dock visibility."""
+    def _sync_sidebar_toggles(self) -> None:
+        """Force the Window menu toggles to match the drawer open state."""
         self._catalog.action(ActionId.TOGGLE_STUDY_EXPLORER).setChecked(
-            self._study_explorer_dock.isVisible()
+            self._study_explorer_drawer.is_open
         )
-        self._catalog.action(ActionId.TOGGLE_METADATA).setChecked(self._metadata_dock.isVisible())
+        self._catalog.action(ActionId.TOGGLE_METADATA).setChecked(self._metadata_drawer.is_open)
 
     def _open_settings(self) -> None:
         """Open the settings dialog with live preview and applied preferences."""
@@ -840,14 +825,14 @@ class MainWindow(QMainWindow):
         dialog.exec()
 
     def _toggle_study_explorer(self) -> None:
-        """Show or hide the study explorer dock."""
+        """Open or collapse the study explorer drawer."""
         checked = self._catalog.action(ActionId.TOGGLE_STUDY_EXPLORER).isChecked()
-        self._study_explorer_dock.setVisible(checked)
+        self._study_explorer_drawer.set_open(checked)
 
     def _toggle_metadata(self) -> None:
-        """Show or hide the metadata dock."""
+        """Open or collapse the metadata drawer."""
         checked = self._catalog.action(ActionId.TOGGLE_METADATA).isChecked()
-        self._metadata_dock.setVisible(checked)
+        self._metadata_drawer.set_open(checked)
 
     def _toggle_fullscreen(self) -> None:
         """Toggle fullscreen viewer mode.
@@ -868,8 +853,8 @@ class MainWindow(QMainWindow):
             self.menuBar(): self.menuBar().isVisible(),
             self._toolbar: self._toolbar.isVisible(),
             self.statusBar(): self.statusBar().isVisible(),
-            self._study_explorer_dock: self._study_explorer_dock.isVisible(),
-            self._metadata_dock: self._metadata_dock.isVisible(),
+            self._study_explorer_drawer: self._study_explorer_drawer.isVisible(),
+            self._metadata_drawer: self._metadata_drawer.isVisible(),
         }
         self._set_chrome_visible(False)
         self.showFullScreen()
@@ -883,32 +868,24 @@ class MainWindow(QMainWindow):
     def _set_chrome_visible(self, visible: bool) -> None:
         """Show or hide the window chrome and sidebars.
 
-        Dock-visibility signals are suppressed while this runs so the
-        View/Window menu toggles keep reflecting the user's actual preference
-        instead of the temporary fullscreen state.
+        Drawer open/collapsed state is untouched, so a collapsed drawer stays
+        collapsed and an open one stays open across the fullscreen toggle.
         """
-        self._suppress_dock_signals = True
-        try:
-            for widget in self._fullscreen_chrome:
-                widget.setVisible(visible and self._fullscreen_chrome[widget])
-        finally:
-            self._suppress_dock_signals = False
+        for widget in self._fullscreen_chrome:
+            widget.setVisible(visible and self._fullscreen_chrome[widget])
 
     def _exit_application(self) -> None:
         """Close the window, quitting the application."""
         self.close()
 
     def _restore_default_layout(self) -> None:
-        """Restore the default dock positions and panel widths."""
+        """Restore the default layout and open both drawers at default widths."""
         self.restoreState(self._default_dock_state, _STATE_VERSION)
-        self._study_explorer_dock.setVisible(True)
-        self._metadata_dock.setVisible(True)
-        self.resizeDocks(
-            [self._study_explorer_dock, self._metadata_dock],
-            [SIDEBAR_WIDTHS["study_explorer"], SIDEBAR_WIDTHS["metadata"]],
-            Qt.Orientation.Horizontal,
-        )
-        self._sync_dock_toggles()
+        self._study_explorer_drawer.set_open_width(SIDEBAR_WIDTHS["study_explorer"])
+        self._metadata_drawer.set_open_width(SIDEBAR_WIDTHS["metadata"])
+        self._study_explorer_drawer.set_open(True)
+        self._metadata_drawer.set_open(True)
+        self._sync_sidebar_toggles()
 
 
 def _export_format_for(path: Path, selected_filter: str) -> ExportFormat | None:

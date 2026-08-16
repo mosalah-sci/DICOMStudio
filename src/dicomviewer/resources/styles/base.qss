@@ -95,18 +95,21 @@ QStatusBar::item {
     border: none;
 }
 
-QDockWidget {
-    color: @text@;
+QWidget#drawerContent {
+    background-color: @base@;
 }
-QDockWidget::title {
+QWidget#drawerHeader {
     background-color: @surface@;
     border-bottom: 1px solid @border@;
-    padding: 7px 8px;
-    font-weight: 600;
-    font-size: 12px;
 }
-QDockWidget > QWidget {
-    background-color: @base@;
+QLabel#drawerHeaderTitle {
+    color: @text@;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+QWidget#viewerPanel {
+    background-color: @viewer@;
 }
 
 QSplitter::handle {
@@ -232,6 +235,10 @@ QLabel#emptyStateTitle {
 QLabel#emptyStateBody {
     color: @muted@;
     font-size: 13px;
+}
+QLabel#sidebarNote {
+    color: @muted@;
+    font-size: 12px;
 }
 
 QWidget#viewerPanel {

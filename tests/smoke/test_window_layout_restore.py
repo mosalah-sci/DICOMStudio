@@ -1,8 +1,8 @@
-"""Regression tests for window layout restore and the Study Explorer dock.
+"""Regression tests for window layout restore and the Study Explorer drawer.
 
 These lock in the PACS requirement that a successfully loaded study is never
-left unreachable: the Study Explorer must always be visible after a scan that
-finds content, regardless of what the persisted layout says.
+left unreachable: the Study Explorer drawer must always be open after a scan
+that finds content, regardless of what the persisted layout says.
 """
 
 from __future__ import annotations
@@ -29,66 +29,66 @@ def _sample_tree() -> StudyTree:
 
 
 def _show(qapp: QApplication, window: MainWindow) -> None:
-    """Show the window and pump events so dock visibility settles."""
+    """Show the window and pump events so drawer visibility settles."""
     window.show()
     qapp.processEvents()
 
 
-def test_first_launch_shows_both_docks(
+def test_first_launch_shows_both_drawers_open(
     make_window: Callable[..., MainWindow],
     qapp: QApplication,
 ) -> None:
     window = make_window()
     _show(qapp, window)
-    assert window._study_explorer_dock.isVisible()
-    assert window._metadata_dock.isVisible()
+    assert window._study_explorer_drawer.is_open
+    assert window._metadata_drawer.is_open
     assert window.action(ActionId.TOGGLE_STUDY_EXPLORER).isChecked()
     assert window.action(ActionId.TOGGLE_METADATA).isChecked()
     window.close()
     qapp.processEvents()
 
 
-def test_restored_layout_keeps_study_explorer_visible(
+def test_restored_layout_keeps_study_explorer_open(
     make_window: Callable[..., MainWindow],
     qapp: QApplication,
 ) -> None:
     first = make_window()
     _show(qapp, first)
-    assert first._study_explorer_dock.isVisible()
+    assert first._study_explorer_drawer.is_open
     first.close()
     qapp.processEvents()
 
     restored = make_window()
     _show(qapp, restored)
-    assert restored._study_explorer_dock.isVisible()
+    assert restored._study_explorer_drawer.is_open
     assert restored.action(ActionId.TOGGLE_STUDY_EXPLORER).isChecked()
     restored.close()
     qapp.processEvents()
 
 
-def test_hidden_study_explorer_returns_after_successful_scan(
+def test_collapsed_study_explorer_returns_after_successful_scan(
     make_window: Callable[..., MainWindow],
     qapp: QApplication,
     tmp_path: Path,
 ) -> None:
     first = make_window()
     _show(qapp, first)
-    first._study_explorer_dock.setVisible(False)
+    first._study_explorer_drawer.set_open(False, animate=False)
     qapp.processEvents()
-    assert not first._study_explorer_dock.isVisible()
+    assert not first._study_explorer_drawer.is_open
     first.close()
     qapp.processEvents()
 
     scanner = FakeStudyScanner(tree=_sample_tree())
     window = make_window(study_scanner=scanner)
     _show(qapp, window)
-    assert not window._study_explorer_dock.isVisible()
+    assert not window._study_explorer_drawer.is_open
     assert not window.action(ActionId.TOGGLE_STUDY_EXPLORER).isChecked()
 
     window._start_scan(tmp_path / "studies")
     panel = window._study_explorer_panel
     assert pump_until(qapp, lambda: panel._stack.currentIndex() == 3)
-    assert window._study_explorer_dock.isVisible()
+    assert window._study_explorer_drawer.is_open
     assert window.action(ActionId.TOGGLE_STUDY_EXPLORER).isChecked()
     assert pump_until(
         qapp, lambda: (window._scan_thread is None or not window._scan_thread.isRunning())
@@ -97,7 +97,7 @@ def test_hidden_study_explorer_returns_after_successful_scan(
     qapp.processEvents()
 
 
-def test_corrupted_dock_layout_falls_back_to_visible_docks(
+def test_corrupted_dock_layout_falls_back_to_open_drawers(
     make_window: Callable[..., MainWindow],
     qapp: QApplication,
     tmp_path: Path,
@@ -113,8 +113,8 @@ def test_corrupted_dock_layout_falls_back_to_visible_docks(
     )
     window = make_window()
     _show(qapp, window)
-    assert window._study_explorer_dock.isVisible()
-    assert window._metadata_dock.isVisible()
+    assert window._study_explorer_drawer.is_open
+    assert window._metadata_drawer.is_open
     assert window.action(ActionId.TOGGLE_STUDY_EXPLORER).isChecked()
     window.close()
     qapp.processEvents()
@@ -131,7 +131,7 @@ def test_repeated_launch_close_cycles_keep_study_explorer_accessible(
         window._start_scan(tmp_path / f"cycle-{cycle}")
         panel = window._study_explorer_panel
         assert pump_until(qapp, lambda panel=panel: panel._stack.currentIndex() == 3)
-        assert window._study_explorer_dock.isVisible()
+        assert window._study_explorer_drawer.is_open
         assert window.action(ActionId.TOGGLE_STUDY_EXPLORER).isChecked()
         assert pump_until(
             qapp,

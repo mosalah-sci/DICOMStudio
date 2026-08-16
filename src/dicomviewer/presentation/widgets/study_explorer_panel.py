@@ -20,7 +20,7 @@ from dicomviewer.application.discovery import ThumbnailService
 from dicomviewer.domain.studies import Image, Patient, Series, Study, StudyTree
 from dicomviewer.domain.thumbnail import Thumbnail
 from dicomviewer.presentation.theme.icon_provider import IconProvider
-from dicomviewer.presentation.widgets.empty_state import EmptyState
+from dicomviewer.presentation.widgets.empty_state import SidebarNote
 from dicomviewer.presentation.workers.thumbnail_loader import ThumbnailLoader
 from dicomviewer.shared.constants import PADDING_12
 
@@ -76,32 +76,10 @@ class StudyExplorerPanel(QWidget):
         self._tree.itemActivated.connect(self._on_item_activated)
 
         self._stack = QStackedWidget(self)
-        self._stack.addWidget(
-            EmptyState(
-                self,
-                icon_provider,
-                icon_name="folder-plus",
-                title="No studies loaded",
-                description="Open a folder to browse DICOM studies.",
-            )
-        )
-        self._scanning_state = EmptyState(
-            self,
-            icon_provider,
-            icon_name="activity",
-            title="Scanning folder…",
-            description="Discovering DICOM studies. This may take a moment.",
-        )
+        self._stack.addWidget(SidebarNote(self, "No studies loaded"))
+        self._scanning_state = SidebarNote(self)
         self._stack.addWidget(self._scanning_state)
-        self._stack.addWidget(
-            EmptyState(
-                self,
-                icon_provider,
-                icon_name="folder",
-                title="No DICOM studies found",
-                description="The selected folder contains no valid DICOM files.",
-            )
-        )
+        self._stack.addWidget(SidebarNote(self, "No DICOM studies found"))
         self._stack.addWidget(self._tree)
         self._stack.setCurrentIndex(_PAGE_INITIAL)
 
@@ -120,13 +98,9 @@ class StudyExplorerPanel(QWidget):
         self._loader.cancel_pending()
         self._clear_tree()
         if folder is not None:
-            self._scanning_state.set_description(
-                f"Discovering DICOM studies in {folder}. This may take a moment."
-            )
+            self._scanning_state.set_text(f"Scanning {folder}…")
         else:
-            self._scanning_state.set_description(
-                "Discovering DICOM studies. This may take a moment."
-            )
+            self._scanning_state.set_text("Scanning…")
         self._stack.setCurrentIndex(_PAGE_SCANNING)
 
     def set_study_tree(self, tree: StudyTree) -> None:

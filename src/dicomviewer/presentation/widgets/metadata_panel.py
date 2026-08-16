@@ -30,7 +30,7 @@ from dicomviewer.application.metadata import (
 from dicomviewer.domain.metadata import MetadataDocument, MetadataElement
 from dicomviewer.domain.studies import Image
 from dicomviewer.presentation.theme.icon_provider import IconProvider
-from dicomviewer.presentation.widgets.empty_state import EmptyState
+from dicomviewer.presentation.widgets.empty_state import SidebarNote
 from dicomviewer.shared.constants import PADDING_8
 
 _PAGE_EMPTY = 0
@@ -103,34 +103,10 @@ class MetadataPanel(QWidget):
         self._tree.customContextMenuRequested.connect(self._show_context_menu)
 
         self._stack = QStackedWidget(self)
-        self._stack.addWidget(
-            EmptyState(
-                self,
-                icon_provider,
-                icon_name="info",
-                title="No metadata available",
-                description="Select a series to inspect its DICOM metadata.",
-            )
-        )
+        self._stack.addWidget(SidebarNote(self, "No metadata selected"))
         self._stack.addWidget(self._tree)
-        self._stack.addWidget(
-            EmptyState(
-                self,
-                icon_provider,
-                icon_name="info",
-                title="No matching metadata",
-                description="No elements match your search.",
-            )
-        )
-        self._stack.addWidget(
-            EmptyState(
-                self,
-                icon_provider,
-                icon_name="info",
-                title="Metadata unavailable",
-                description="The metadata could not be read from the selected image.",
-            )
-        )
+        self._stack.addWidget(SidebarNote(self, "No matching metadata"))
+        self._stack.addWidget(SidebarNote(self, "Metadata unavailable"))
         self._stack.setCurrentIndex(_PAGE_EMPTY)
 
         layout = QVBoxLayout(self)

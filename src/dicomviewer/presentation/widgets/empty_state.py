@@ -11,6 +11,31 @@ from dicomviewer.presentation.theme.icon_provider import IconProvider
 from dicomviewer.shared.constants import EMPTY_STATE_ICON_SIZE, PADDING_8
 
 
+class SidebarNote(QWidget):
+    """A single muted line of text for a sidebar's non-content state.
+
+    Sidebar empty states stay visually clean: a short, unobtrusive hint
+    instead of the larger onboarding empty state shown in the central area.
+    """
+
+    def __init__(self, parent: QWidget, text: str = "") -> None:
+        """Build the note with the given muted hint text."""
+        super().__init__(parent)
+        self._label = QLabel(text, self)
+        self._label.setObjectName("sidebarNote")
+        self._label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._label.setWordWrap(True)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(PADDING_8, PADDING_8, PADDING_8, PADDING_8)
+        layout.addStretch()
+        layout.addWidget(self._label)
+        layout.addStretch()
+
+    def set_text(self, text: str) -> None:
+        """Replace the note text."""
+        self._label.setText(text)
+
+
 class EmptyState(QWidget):
     """A centered icon, title, description and optional action button."""
 

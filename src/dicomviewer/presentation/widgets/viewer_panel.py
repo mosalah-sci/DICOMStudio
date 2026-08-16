@@ -59,11 +59,10 @@ class ViewerPanel(QWidget):
             EmptyState(
                 self,
                 icon_provider,
-                icon_name="activity",
+                icon_name="brand",
                 title="Welcome to DICOMStudio",
                 description=(
-                    "Open a folder of DICOM studies to begin, or drag and drop "
-                    "a DICOM file or folder anywhere in this window."
+                    "Open a DICOM folder to get started\n" "or drag & drop DICOM files/folders here"
                 ),
                 action_text="Open Folder...",
                 on_action=self.open_folder_requested.emit,
