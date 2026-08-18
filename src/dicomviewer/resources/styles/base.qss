@@ -108,6 +108,17 @@ QLabel#drawerHeaderTitle {
     font-weight: 600;
 }
 
+QLabel#inspectorSource {
+    color: @muted@;
+    font-size: 12px;
+    padding: 2px 0;
+}
+QLabel#inspectorSummary {
+    color: @muted@;
+    font-size: 12px;
+    padding: 2px 0;
+}
+
 QWidget#viewerPanel {
     background-color: @viewer@;
 }
@@ -304,4 +315,37 @@ QScrollBar::add-page, QScrollBar::sub-page {
 
 QMessageBox {
     background-color: @window@;
+}
+
+QWidget#thumbnailGridContent {
+    background-color: @base@;
+}
+QLabel#gridEmpty {
+    color: @muted@;
+    font-size: 12px;
+    padding: 8px;
+}
+QFrame#gridCell {
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 4px;
+}
+QFrame#gridCell:hover {
+    border-color: @hover@;
+    background-color: @hover@;
+}
+QFrame#gridCell[selected="true"] {
+    background-color: @selection@;
+    border-color: @accent@;
+}
+QLabel#gridThumb {
+    background-color: @alternate@;
+    border-radius: 3px;
+}
+QLabel#gridIndex {
+    color: @muted@;
+    font-size: 10px;
+}
+QFrame#gridCell[selected="true"] QLabel#gridIndex {
+    color: @on_accent@;
 }

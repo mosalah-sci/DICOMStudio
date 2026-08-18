@@ -124,6 +124,14 @@ _SPECS: tuple[ActionSpec, ...] = (
         status_tip="Save a PNG screenshot of the current view",
     ),
     ActionSpec(
+        ActionId.INSPECT_DICOM,
+        "&Inspect DICOM Dataset...",
+        icon="info",
+        shortcut="Ctrl+I",
+        tooltip="Inspect the raw DICOM tags of the current image (Ctrl+I)",
+        status_tip="Inspect the raw DICOM tags of the current image",
+    ),
+    ActionSpec(
         ActionId.SETTINGS,
         "&Settings...",
         icon="sliders",

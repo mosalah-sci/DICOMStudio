@@ -28,6 +28,7 @@ from tests.dicom_utils import (
     FakeMetadataService,
     FakePixelDecoder,
     FakeStudyScanner,
+    FakeTagInspector,
     FakeThumbnailService,
     FakeViewRenderer,
 )
@@ -43,7 +44,7 @@ def qapp() -> QApplication:
 
 
 @pytest.fixture
-def icon_provider() -> IconProvider:
+def icon_provider(qapp: QApplication) -> IconProvider:
     """Provide an icon provider backed by the real bundled icons."""
     with as_file(files("dicomviewer.resources").joinpath("icons")) as icon_dir:
         yield IconProvider(icon_dir)
@@ -67,6 +68,7 @@ def make_window(
         image_analyzer: FakeImageAnalyzer | None = None,
         metadata_service: FakeMetadataService | None = None,
         image_exporter: FakeImageExporter | None = None,
+        tag_inspector: FakeTagInspector | None = None,
         screenshot_dir: Path | None = None,
     ) -> MainWindow:
         settings_path = tmp_path / "settings.toml"
@@ -91,6 +93,7 @@ def make_window(
             image_analyzer=image_analyzer or FakeImageAnalyzer(),
             metadata_service=metadata_service or FakeMetadataService(),
             image_exporter=image_exporter or FakeImageExporter(),
+            tag_inspector=tag_inspector or FakeTagInspector(),
             screenshot_dir=screenshot_dir,
             error_presenter=FakeErrorPresenter(),
         )

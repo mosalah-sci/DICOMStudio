@@ -48,6 +48,7 @@ def populate_menu_bar(
     _add(tools_menu, catalog, ActionId.WINDOW_LEVEL)
     preset_actions = _add_window_presets(tools_menu, window_presets, on_window_preset)
     _add(tools_menu, catalog, ActionId.MEASURE)
+    _add(tools_menu, catalog, ActionId.INSPECT_DICOM)
     if on_clear_measurements is not None:
         tools_menu.addSeparator()
         _add(tools_menu, catalog, ActionId.CLEAR_MEASUREMENTS)
@@ -89,25 +90,35 @@ def populate_recent_folders_menu(
     menu: QMenu,
     recent_folders: Sequence[Path],
     on_open_recent: Callable[[Path], None] | None = None,
+    on_clear_recent: Callable[[], None] | None = None,
 ) -> None:
-    """Populate ``menu`` with one action per recently opened folder.
+    """Populate ``menu`` with one action per recently opened study folder.
 
     The menu is cleared first so callers can re-populate it whenever the
-    recent list changes. An empty list yields a single disabled placeholder.
+    recent list changes. Entries show the folder name with the full path as a
+    tooltip; an empty list yields a single disabled placeholder. When
+    ``on_clear_recent`` is provided a Clear action is appended.
     """
     menu.clear()
     if not recent_folders:
-        placeholder = QAction("No Recent Folders", menu)
+        placeholder = QAction("No Recent Studies", menu)
         placeholder.setEnabled(False)
         menu.addAction(placeholder)
         return
     for folder in recent_folders:
-        action = QAction(str(folder), menu)
+        label = folder.name or str(folder)
+        action = QAction(label, menu)
         action.setStatusTip(f"Open {folder}")
         action.setToolTip(str(folder))
         if on_open_recent is not None:
             action.triggered.connect(lambda _checked=False, f=folder: on_open_recent(f))
         menu.addAction(action)
+    if on_clear_recent is not None:
+        menu.addSeparator()
+        clear_action = QAction("Clear Recent Studies", menu)
+        clear_action.setStatusTip("Remove every entry from the recent studies list")
+        clear_action.triggered.connect(lambda _checked=False: on_clear_recent())
+        menu.addAction(clear_action)
 
 
 def create_toolbar(main_window: QMainWindow, catalog: ActionCatalog) -> QToolBar:

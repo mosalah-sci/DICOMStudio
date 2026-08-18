@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
     QLabel,
+    QMenu,
     QPushButton,
     QWidget,
 )
@@ -201,6 +202,52 @@ def test_activating_a_series_loads_the_viewer(
     assert window._viewer_panel.current_slice == 0
     assert window.action(ActionId.ZOOM_IN).isEnabled()
     assert window.action(ActionId.FIT_TO_WINDOW).isEnabled()
+    assert window.action(ActionId.INSPECT_DICOM).isEnabled()
+
+
+def test_inspect_dicom_action_is_disabled_without_content(
+    make_window: Callable[..., MainWindow],
+) -> None:
+    window = make_window()
+    assert not window.action(ActionId.INSPECT_DICOM).isEnabled()
+
+
+def test_tools_menu_contains_the_inspect_action(
+    make_window: Callable[..., MainWindow],
+) -> None:
+    window = make_window()
+    tools_menu = next(
+        (menu for menu in window.menuBar().findChildren(QMenu) if menu.title() == "&Tools"),
+        None,
+    )
+    assert tools_menu is not None
+    inspect = next(
+        action
+        for action in tools_menu.actions()
+        if action.objectName() == ActionId.INSPECT_DICOM.value
+    )
+    assert "Inspect" in inspect.text()
+
+
+def test_activating_a_series_highlights_its_preview_thumbnail(
+    make_window: Callable[..., MainWindow],
+    qapp: QApplication,
+    tmp_path: Path,
+) -> None:
+    scanner = FakeStudyScanner(tree=_sample_tree())
+    window = make_window(study_scanner=scanner)
+    folder = tmp_path / "studies"
+    folder.mkdir()
+    window._start_scan(folder)
+    panel = window._study_explorer_panel
+    assert pump_until(qapp, lambda: panel._stack.currentIndex() == 3)
+    series_item = panel._tree.topLevelItem(0).child(0).child(0)
+    panel._tree.setCurrentItem(series_item)
+    assert not panel._grid.isHidden()
+    panel._tree.itemActivated.emit(series_item, 0)
+    assert window._viewer_panel.has_image
+    assert panel._grid.selected_index() == 0
+    assert panel._grid.cell(0).property("selected") is True
 
 
 def test_viewer_actions_are_disabled_without_content(
@@ -212,7 +259,18 @@ def test_viewer_actions_are_disabled_without_content(
     assert not window.action(ActionId.EXPORT_IMAGE).isEnabled()
     assert not window.action(ActionId.SCREENSHOT).isEnabled()
     assert not window.action(ActionId.COPY_IMAGE).isEnabled()
+    assert not window.action(ActionId.INSPECT_DICOM).isEnabled()
     assert all(not action.isEnabled() for action in window._preset_actions)
+
+
+def test_window_carries_the_brand_icon(
+    make_window: Callable[..., MainWindow],
+) -> None:
+    window = make_window()
+    icon = window.windowIcon()
+    assert not icon.isNull()
+    assert len(icon.availableSizes()) >= 5
+    assert icon.availableSizes()[0].width() == 16
 
 
 def test_window_preset_menu_exists(make_window: Callable[..., MainWindow]) -> None:
@@ -462,7 +520,22 @@ def test_start_scan_records_a_recent_folder(
     window._start_scan(folder)
     assert window._settings_manager.current_settings.recent.folders[0] == folder
     assert window._recent_menu is not None
-    assert any(action.text() == str(folder) for action in window._recent_menu.actions())
+    entry = next(action for action in window._recent_menu.actions() if action.text() == "studies")
+    assert entry.toolTip() == str(folder)
+
+
+def test_recent_menu_offers_clear_recent_studies(
+    make_window: Callable[..., MainWindow],
+    tmp_path: Path,
+) -> None:
+    window = make_window(study_scanner=FakeStudyScanner(tree=_sample_tree()))
+    folder = tmp_path / "studies"
+    folder.mkdir()
+    window._start_scan(folder)
+    assert window._settings_manager.current_settings.recent.folders
+    window._clear_recent_studies()
+    assert window._settings_manager.current_settings.recent.folders == ()
+    assert "Recent studies cleared" in window.statusBar().currentMessage()
 
 
 def test_open_recent_folder_starts_a_scan(

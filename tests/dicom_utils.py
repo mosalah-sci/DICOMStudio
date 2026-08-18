@@ -13,6 +13,7 @@ from dicomviewer.application.viewing import PixelArray, RenderedImage
 from dicomviewer.domain.export import ExportFormat
 from dicomviewer.domain.metadata import MetadataDocument, MetadataElement, MetadataGroup
 from dicomviewer.domain.studies import Image, StudyTree
+from dicomviewer.domain.tags import TagDocument
 from dicomviewer.domain.thumbnail import Thumbnail
 from dicomviewer.domain.viewport import Viewport
 
@@ -231,6 +232,25 @@ class FakeMetadataService:
 
     def extract(self, image: Image) -> MetadataDocument:
         self.extracted.append(image)
+        if self.error is not None:
+            raise self.error
+        return self.document
+
+
+class FakeTagInspector:
+    """TagInspector double returning a fixed document or raising an error."""
+
+    def __init__(
+        self,
+        document: TagDocument | None = None,
+        error: Exception | None = None,
+    ) -> None:
+        self.document = document or TagDocument(source=Path("sample.dcm"))
+        self.error = error
+        self.inspected: list[Path] = []
+
+    def inspect(self, path: Path) -> TagDocument:
+        self.inspected.append(Path(path))
         if self.error is not None:
             raise self.error
         return self.document

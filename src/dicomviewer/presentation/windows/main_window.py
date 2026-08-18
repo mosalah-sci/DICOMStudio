@@ -35,6 +35,7 @@ from PySide6.QtWidgets import (
 
 from dicomviewer.application.discovery import StudyScanner, ThumbnailService
 from dicomviewer.application.export import ExportError, ImageExporter
+from dicomviewer.application.inspection import TagInspector
 from dicomviewer.application.measurement import MeasurementCollection
 from dicomviewer.application.metadata import MetadataService
 from dicomviewer.application.processing import ImageAnalyzer
@@ -55,7 +56,7 @@ from dicomviewer.domain.settings import (
     ViewingSettings,
     WorkspaceSettings,
 )
-from dicomviewer.domain.studies import Series, StudyTree
+from dicomviewer.domain.studies import Image, Series, StudyTree
 from dicomviewer.presentation.actions.action_catalog import ActionCatalog
 from dicomviewer.presentation.actions.action_ids import ActionId
 from dicomviewer.presentation.actions.assembly import (
@@ -65,6 +66,7 @@ from dicomviewer.presentation.actions.assembly import (
 )
 from dicomviewer.presentation.dialogs.about_dialog import AboutDialog
 from dicomviewer.presentation.dialogs.settings_dialog import SettingsDialog
+from dicomviewer.presentation.dialogs.tag_inspector_dialog import TagInspectorDialog
 from dicomviewer.presentation.feedback.error_presenter import ErrorPresenter
 from dicomviewer.presentation.imaging.rendered_image import to_qimage
 from dicomviewer.presentation.theme.icon_provider import IconProvider
@@ -138,6 +140,7 @@ class MainWindow(QMainWindow):
         image_analyzer: ImageAnalyzer,
         metadata_service: MetadataService,
         image_exporter: ImageExporter,
+        tag_inspector: TagInspector,
         screenshot_dir: Path | None = None,
         error_presenter: ErrorPresenter | None = None,
         parent: QWidget | None = None,
@@ -150,6 +153,7 @@ class MainWindow(QMainWindow):
         self._settings_manager = settings_manager
         self._window_state_store = window_state_store
         self._icon_provider = icon_provider
+        self.setWindowIcon(icon_provider.brand_icon())
         self._study_scanner = study_scanner
         self._thumbnail_service = thumbnail_service
         self._pixel_decoder = pixel_decoder
@@ -157,11 +161,13 @@ class MainWindow(QMainWindow):
         self._image_analyzer = image_analyzer
         self._metadata_service = metadata_service
         self._image_exporter = image_exporter
+        self._tag_inspector = tag_inspector
         self._screenshot_dir = screenshot_dir
         self._scan_thread: QThread | None = None
         self._scan_worker: StudyScanWorker | None = None
         self._scan_relay: _ScanRelay | None = None
         self._scan_generation = 0
+        self._current_series: Series | None = None
         self._preset_actions: tuple[QAction, ...] = ()
         self._recent_menu: QMenu | None = None
         self._error_presenter = error_presenter or ErrorPresenter()
@@ -231,6 +237,7 @@ class MainWindow(QMainWindow):
                 ActionId.EXPORT_IMAGE: self._export_image,
                 ActionId.SCREENSHOT: self._capture_screenshot,
                 ActionId.COPY_IMAGE: self._copy_image,
+                ActionId.INSPECT_DICOM: self._inspect_dicom,
             },
         )
 
@@ -246,6 +253,7 @@ class MainWindow(QMainWindow):
             self, self._icon_provider, thumbnail_service=self._thumbnail_service
         )
         self._study_explorer_panel.series_activated.connect(self._on_series_activated)
+        self._study_explorer_panel.inspect_requested.connect(self._inspect_image)
         self._metadata_panel = MetadataPanel(
             self,
             self._icon_provider,
@@ -476,6 +484,7 @@ class MainWindow(QMainWindow):
 
     def _on_series_activated(self, series: Series, index: int) -> None:
         """Display the activated series in the viewer and metadata panel."""
+        self._current_series = series
         self._viewer_panel.load_series(series.images, index)
         self._metadata_panel.show_series(series.images, index)
         self._apply_default_window_preset()
@@ -484,9 +493,28 @@ class MainWindow(QMainWindow):
         )
 
     def _on_slice_changed(self, index: int, count: int) -> None:
-        """Show the metadata of the newly displayed slice."""
-        del count
+        """Show the metadata and thumbnail selection of the new slice."""
         self._metadata_panel.show_slice(index)
+        self._study_explorer_panel.set_active_slice(index)
+
+    def _current_image(self) -> Image | None:
+        """Return the image currently displayed in the viewer, if any."""
+        series = self._current_series
+        if series is None or not series.images:
+            return None
+        index = min(max(self._viewer_panel.current_slice, 0), len(series.images) - 1)
+        return series.images[index]
+
+    def _inspect_image(self, image: Image) -> None:
+        """Open the DICOM dataset inspector for ``image``."""
+        dialog = TagInspectorDialog(self, image.path, self._tag_inspector)
+        dialog.exec()
+
+    def _inspect_dicom(self) -> None:
+        """Inspect the DICOM tags of the image currently displayed."""
+        image = self._current_image()
+        if image is not None:
+            self._inspect_image(image)
 
     def _apply_window_preset(self, preset: WindowPreset) -> None:
         """Apply a named clinical window preset to the viewer."""
@@ -505,6 +533,7 @@ class MainWindow(QMainWindow):
             ActionId.EXPORT_IMAGE,
             ActionId.SCREENSHOT,
             ActionId.COPY_IMAGE,
+            ActionId.INSPECT_DICOM,
         ):
             self._catalog.action(action_id).setEnabled(has_image)
         for action in self._preset_actions:
@@ -697,14 +726,14 @@ class MainWindow(QMainWindow):
             self._viewer_panel.apply_preset(preset)
 
     def _build_recent_folders_menu(self) -> None:
-        """Insert the Recent Folders submenu into the File menu."""
+        """Insert the Recent Studies submenu into the File menu."""
         file_menu = next(
             (menu for menu in self.menuBar().findChildren(QMenu) if menu.title() == "&File"),
             None,
         )
         if file_menu is None:
             return
-        recent_menu = QMenu("Recent &Folders", file_menu)
+        recent_menu = QMenu("Recent &Studies", file_menu)
         separators = [action for action in file_menu.actions() if action.isSeparator()]
         if separators:
             file_menu.insertMenu(separators[0], recent_menu)
@@ -714,14 +743,29 @@ class MainWindow(QMainWindow):
         self._refresh_recent_menu()
 
     def _refresh_recent_menu(self) -> None:
-        """Rebuild the Recent Folders submenu from the persisted settings."""
+        """Rebuild the Recent Studies submenu from the persisted settings."""
         if self._recent_menu is None:
             return
         populate_recent_folders_menu(
             self._recent_menu,
             self._settings_manager.current_settings.recent.folders,
             self._open_recent_folder,
+            on_clear_recent=self._clear_recent_studies,
         )
+
+    def _clear_recent_studies(self) -> None:
+        """Clear the recent studies list and rebuild its menu."""
+        try:
+            self._settings_manager.clear_recent_folders()
+        except SettingsError as exc:
+            self._error_presenter.show_warning(
+                self,
+                "Recent Studies Not Cleared",
+                "The recent studies list could not be cleared.",
+                detail=str(exc),
+            )
+        self._refresh_recent_menu()
+        self._status_bar.showMessage("Recent studies cleared.")
 
     def _open_recent_folder(self, folder: Path) -> None:
         """Open a recently used folder, dropping it when it no longer exists."""

@@ -20,6 +20,7 @@ class ActionId(StrEnum):
     CLEAR_MEASUREMENTS = "clear_measurements"
     COPY_IMAGE = "copy_image"
     SCREENSHOT = "screenshot"
+    INSPECT_DICOM = "inspect_dicom"
     SETTINGS = "settings"
     TOGGLE_STUDY_EXPLORER = "toggle_study_explorer"
     TOGGLE_METADATA = "toggle_metadata"

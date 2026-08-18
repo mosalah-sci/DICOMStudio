@@ -42,6 +42,38 @@ class IconProvider:
         self._cache[key] = icon
         return icon
 
+    def brand_icon(self) -> QIcon:
+        """Return the multi-resolution DICOMStudio logo as a window icon.
+
+        The brand art keeps its own palette (it contains no ``currentColor``
+        tokens), so unlike toolbar icons it is theme-independent. Multiple
+        pixmaps are embedded so Windows can pick the crispest size for the
+        title bar, taskbar and Alt+Tab preview.
+        """
+        key = ("brand", "", 0)
+        cached = self._cache.get(key)
+        if cached is not None:
+            return cached
+        icon = QIcon()
+        source = self._load_svg("brand", self._color)
+        if source is None:
+            return icon
+        renderer = QSvgRenderer(QByteArray(source.encode("utf-8")))
+        if not renderer.isValid():
+            logger.warning("Invalid SVG for brand icon '{}'", "brand")
+            return icon
+        for size in (16, 24, 32, 48, 64, 128, 256):
+            pixmap = QPixmap(size, size)
+            pixmap.fill(Qt.GlobalColor.transparent)
+            painter = QPainter(pixmap)
+            try:
+                renderer.render(painter, QRectF(0.0, 0.0, float(size), float(size)))
+            finally:
+                painter.end()
+            icon.addPixmap(pixmap)
+        self._cache[key] = icon
+        return icon
+
     def _render(self, name: str, color: str, size: int) -> QIcon:
         """Rasterize the named SVG at double density for crisp high-DPI icons."""
         source = self._load_svg(name, color)

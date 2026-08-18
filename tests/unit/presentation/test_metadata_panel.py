@@ -152,6 +152,16 @@ def test_element_items_carry_their_element_for_copy(qapp, icon_provider) -> None
     assert element.tag == "(0010,0010)"
 
 
+def test_rows_show_property_and_value(qapp, icon_provider) -> None:
+    panel = _panel(icon_provider)
+    panel.show_series((Image(Path("a.dcm"), 1),))
+    item = _element_item(panel)
+    assert item is not None
+    assert item.text(0) == "Patient's Name"
+    assert item.text(1) == "DOE^JOHN"
+    assert panel._tree.columnCount() == 2
+
+
 def test_extraction_failure_shows_the_unavailable_page(qapp, icon_provider) -> None:
     service = SliceMetadataService({})
     panel = _panel(icon_provider, service)

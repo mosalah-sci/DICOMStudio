@@ -5,6 +5,36 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.2.0] - 2026-08-17
+
+### Added
+
+- **DICOM Dataset Inspector** — Tools → Inspect DICOM Dataset (Ctrl+I) opens a
+  searchable, read-only table of every raw DICOM element of the current image —
+  public and private — with Tag, Keyword, Name, VR and formatted Value, plus a
+  right-click copy menu. The same inspector is reachable from the Study
+  Explorer context menu.
+- **Study Explorer context menus** — right-click a node to Open First Study /
+  Open in Viewer / Open, Inspect DICOM Dataset…, copy a concise node summary,
+  or Expand All / Collapse All.
+- **Recent Studies menu** — the File menu's recent list now shows folder names
+  with the full path as a tooltip and a Clear Recent Studies action.
+
+### Changed
+
+- **Study Explorer preview grid** — selecting a Series now shows its images as
+  a compact, responsive thumbnail grid below the tree instead of a long
+  per-image list. Thumbnails are generated lazily for the cells in the
+  viewport, the currently displayed slice stays highlighted while scrolling,
+  and clicking a thumbnail loads that image.
+- **Cleaner sidebar headers** — the Study Explorer and Metadata panels now
+  show only their title with the collapse arrow; the per-selection context
+  headers were removed.
+- **Metadata Property | Value view** — the metadata tree no longer shows a
+  separate Tag column; tags remain visible in the per-element tooltip and in
+  the Copy Tag context action.
+- The File menu's Recent Folders submenu is now labeled Recent Studies.
+
 ## [1.1.0] - 2026-08-15
 
 ### Added

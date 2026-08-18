@@ -25,6 +25,7 @@ from dicomviewer.infrastructure.configuration.settings_service import build_sett
 from dicomviewer.infrastructure.dicom.metadata_reader import PydicomMetadataService
 from dicomviewer.infrastructure.dicom.pixel_reader import PydicomPixelDecoder
 from dicomviewer.infrastructure.dicom.scanner import PydicomStudyScanner
+from dicomviewer.infrastructure.dicom.tag_inspector import PydicomTagInspector
 from dicomviewer.infrastructure.dicom.thumbnail_service import PydicomThumbnailService
 from dicomviewer.infrastructure.imaging.qt_exporter import QtImageExporter
 from dicomviewer.infrastructure.logging.setup import configure_logging
@@ -82,6 +83,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     logger.info("Starting {name} {version}", name=APP_NAME, version=__version__)
     icon_provider = IconProvider(_icons_dir())
+    application.setWindowIcon(icon_provider.brand_icon())
     theme_controller = ThemeController(theme_manager, ThemeProvider(application), icon_provider)
     window_state_store = JsonWindowStateStore(paths.config_dir / "window_state.json")
     window = MainWindow(
@@ -98,6 +100,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         image_analyzer=NumpyImageAnalyzer(),
         metadata_service=PydicomMetadataService(),
         image_exporter=QtImageExporter(),
+        tag_inspector=PydicomTagInspector(),
     )
     theme_controller.apply_current()
     window.show()

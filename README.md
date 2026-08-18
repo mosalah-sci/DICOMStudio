@@ -18,7 +18,7 @@ milestone roadmap.
   <img src="assets/screenshots/main-viewer.png" alt="DICOMStudio main interface: Study Explorer, Image Viewer and Metadata panels with a loaded CT study">
 </p>
 
-> **Status:** Milestone 13 — UX & Workspace Foundation (v1.1.0)
+> **Status:** Milestone 14 — DICOM Study Workflow (v1.2.0)
 
 ---
 
@@ -39,16 +39,17 @@ diagnostic workstation. See [Scope & Disclaimer](#scope--disclaimer).
 | Area | What it does |
 | --- | --- |
 | **Study Discovery** | Recursive, background folder scanning with header-only parsing and live progress; malformed or unrelated files are skipped gracefully. |
-| **Study Explorer** | Patient / Study / Series / Image tree with modality, image counts, study dates, tooltips, and lazy thumbnail generation. |
+| **Study Explorer** | Patient / Study / Series tree with modality, image counts, study dates, tooltips, per-node context menus, and a compact thumbnail-grid preview of the selected series with lazy image generation. |
 | **Image Viewer** | Full-resolution DICOM pixel decoding, grayscale and RGB rendering, MONOCHROME1/2 inversion, Fit to Window, Actual Size, and Zoom In/Out. |
 | **Window / Level** | Right-drag window/level adjustment, automatic reset, and one-click clinical presets (CT Brain, Stroke, Bone, Lung, Abdomen, Mediastinum, Soft Tissue, Temporal Bones). |
 | **Navigation** | Mouse-wheel and keyboard slice navigation, panning, trackpad scrolling, and viewer shortcuts (F fit, R reset view, W reset window/level, M measure). |
-| **Metadata Explorer** | Grouped, searchable DICOM header inspection with copy-to-clipboard for tags and values. |
+| **Metadata Explorer** | Grouped, searchable DICOM header inspection with Property and Value columns, and copy-to-clipboard for tags and values. |
+| **DICOM Dataset Inspector** | Searchable, read-only table of every raw element (public and private) of the current image via Tools → Inspect DICOM Dataset (Ctrl+I) or the Study Explorer context menu. |
 | **Measurements** | Distance and angle measurement tools with per-slice overlays, using DICOM Pixel Spacing when available. |
 | **Statistics & Histogram** | Pixel statistics (min/max/mean/std) and a live mini histogram per slice. |
 | **Export** | PNG/JPEG export (Ctrl+S / Ctrl+E), screenshot capture, and copy-to-clipboard of the current view, including overlays. |
 | **Workspace** | Persisted sidebar visibility and widths, fullscreen viewer mode (F11, Esc to exit), and drag & drop loading of folders or DICOM files. |
-| **Settings & Themes** | Dark and light themes, configurable viewing defaults, render cache size, and a Recent Folders list. |
+| **Settings & Themes** | Dark and light themes, configurable viewing defaults, render cache size, and a Recent Studies list with clear action. |
 | **Windows Packaging** | Standalone build, Inno Setup installer with `.dcm` file association, and a portable zip — no Python required to run. |
 
 ## Screenshots
@@ -256,7 +257,7 @@ repository for contributors but are intentionally not the focus of this page.
 
 ## Roadmap
 
-### Completed (through v1.0.1)
+### Completed (through v1.2.0)
 
 - Application shell, docking workspace, and theming
 - DICOM discovery, background scanning, and study organization
@@ -265,10 +266,13 @@ repository for contributors but are intentionally not the focus of this page.
 - Metadata explorer with search and clipboard actions
 - Distance and angle measurement tools
 - PNG/JPEG export, screenshot capture, and clipboard copy
-- Settings, themes, and Recent Folders
+- Settings, themes, and Recent Studies list
 - Performance optimization pass (thumbnail generation, combined analysis)
 - Windows packaging: standalone build, installer, and portable archive
 - Production readiness review and rebrand to DICOMStudio
+- Workspace persistence, fullscreen viewer, drag & drop loading (v1.1)
+- Study Explorer context menus, DICOM Dataset Inspector, and the compact
+  thumbnail-grid series preview (v1.2)
 
 ### Planned / Future
 

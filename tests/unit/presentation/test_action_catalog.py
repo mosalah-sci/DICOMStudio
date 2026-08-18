@@ -29,6 +29,7 @@ _ENABLED_IDS = (
     ActionId.COPY_IMAGE,
     ActionId.EXPORT_IMAGE,
     ActionId.SCREENSHOT,
+    ActionId.INSPECT_DICOM,
 )
 
 
@@ -41,7 +42,7 @@ def _noop() -> None:
 
 
 @pytest.fixture
-def catalog(icon_provider: IconProvider) -> ActionCatalog:
+def catalog(icon_provider: IconProvider, qapp) -> ActionCatalog:
     # Keep the QObject parent alive for the duration of the test.
     parent = QObject()
     catalog = ActionCatalog(parent, icon_provider, handlers=_handlers())
@@ -50,6 +51,7 @@ def catalog(icon_provider: IconProvider) -> ActionCatalog:
 
 def test_catalog_requires_a_handler_for_every_enabled_action(
     icon_provider: IconProvider,
+    qapp,
 ) -> None:
     with pytest.raises(ValueError):
         ActionCatalog(QObject(), icon_provider, handlers={})
