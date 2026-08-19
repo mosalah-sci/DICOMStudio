@@ -14,6 +14,8 @@ milestone roadmap.
 [![Platform](https://img.shields.io/badge/platform-Windows-0078D6)](#)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
+**Repository:** [github.com/mosalah-sci/DICOMStudio](https://github.com/mosalah-sci/DICOMStudio)
+
 <p align="center">
   <img src="assets/screenshots/main-viewer.png" alt="DICOMStudio main interface: Study Explorer, Image Viewer and Metadata panels with a loaded CT study">
 </p>
@@ -44,7 +46,7 @@ diagnostic workstation. See [Scope & Disclaimer](#scope--disclaimer).
 | **Window / Level** | Right-drag window/level adjustment, automatic reset, and one-click clinical presets (CT Brain, Stroke, Bone, Lung, Abdomen, Mediastinum, Soft Tissue, Temporal Bones). |
 | **Navigation** | Mouse-wheel and keyboard slice navigation, panning, trackpad scrolling, and viewer shortcuts (F fit, R reset view, W reset window/level, M measure). |
 | **Metadata Explorer** | Grouped, searchable DICOM header inspection with Property and Value columns, and copy-to-clipboard for tags and values. |
-| **DICOM Dataset Inspector** | Searchable, read-only table of every raw element (public and private) of the current image via Tools → Inspect DICOM Dataset (Ctrl+I) or the Study Explorer context menu. |
+| **DICOM Dataset Inspector** | Searchable, **read-only** table of every raw element (Tag, Keyword, VR, Value — public and private) for the current image, via Tools → Inspect DICOM Dataset (Ctrl+I) or the Study Explorer context menu. Does not edit tags, anonymize datasets, or provide PACS/networking. |
 | **Measurements** | Distance and angle measurement tools with per-slice overlays, using DICOM Pixel Spacing when available. |
 | **Statistics & Histogram** | Pixel statistics (min/max/mean/std) and a live mini histogram per slice. |
 | **Export** | PNG/JPEG export (Ctrl+S / Ctrl+E), screenshot capture, and copy-to-clipboard of the current view, including overlays. |
@@ -94,10 +96,11 @@ DICOMStudio is distributed as a Windows desktop application in two forms:
 Both are built from the same frozen application — no Python installation is
 required for either.
 
-> **Get the latest build:** [Releases](../../releases/latest)
+> **Get the latest build:** [GitHub Releases](https://github.com/mosalah-sci/DICOMStudio/releases/latest)
+> — current version: **v1.2.0**.
 >
-> *(If your repository does not yet publish GitHub Releases, build the
-> installer and portable archive locally — see [Installation → For
+> *(If a release asset you need is not published yet, build the installer
+> and portable archive locally — see [Installation → For
 > Developers](#for-developers) and `docs/build.md`.)*
 
 ## Installation
@@ -105,7 +108,7 @@ required for either.
 ### For End Users
 
 1. Download the latest installer or portable archive from
-   [Releases](../../releases/latest).
+   [GitHub Releases](https://github.com/mosalah-sci/DICOMStudio/releases/latest).
 2. **Installer:** run `DICOMStudio-<version>-Setup.exe` and follow the setup
    wizard. **Portable:** extract the zip anywhere and run `DICOMStudio.exe`.
 3. Launch DICOMStudio from the Start Menu, desktop shortcut, or the extracted
@@ -120,8 +123,8 @@ See `docs/user/README.md` for the full installation guide.
 Prerequisites: [uv](https://docs.astral.sh/uv/) and Python 3.13.
 
 ```powershell
-git clone <repository-url>
-cd dicomviewer
+git clone https://github.com/mosalah-sci/DICOMStudio.git
+cd DICOMStudio
 uv sync                              # create the environment and install deps
 uv run python -m dicomviewer         # launch the application
 ```
@@ -214,18 +217,29 @@ error handling, versioning, testing strategy, theming, and Windows packaging.
 
 ## Quality & Testing
 
-- Unit, integration and smoke tests under `tests/`, run with `pytest`
+Verified state at the **v1.2.0** release:
+
+| Check | Result |
+| --- | --- |
+| Automated tests (`pytest`) | 456 passed |
+| Formatting (Black) | Clean |
+| Linting (Ruff) | Clean |
+| Static typing (Pyright, strict) | 0 errors, 0 warnings |
+| Package build (`uv build`) | Successful |
+| Windows standalone executable | Verified |
+| Windows installer | Verified |
+| Portable ZIP | Verified |
+| Real CT dataset testing | Completed |
+| End-to-end feature smoke checks | 21 / 21 passed |
+
+- Unit, integration and smoke tests live under `tests/` and run with `pytest`
   (`.\scripts\test.ps1`).
-- Code formatting enforced with **Black**; linting with **Ruff**.
 - **Strict** static typing across `src/` via Pyright (`tool.pyright` in
   `pyproject.toml`).
 - Milestone 12 (Production Readiness) included a project-wide stability
   review across all four layers, with every finding covered by a regression
   test — see the [Changelog](CHANGELOG.md) for specifics.
 - CI-ready workflow targeting Windows.
-
-*(An exact automated test count is not tracked in this document — see the
-`tests/` directory in the repository for the current suite.)*
 
 ## Project Structure
 
@@ -236,7 +250,7 @@ docs/                project documentation and Architecture Decision Records
 config/              configuration reference material
 resources/           runtime-bundled assets (icons, styles, application icon)
 assets/              repository-only media (branding, screenshots)
-packaging/            Windows packaging (PyInstaller spec, Inno Setup script, icon)
+packaging/           Windows packaging (PyInstaller spec, Inno Setup script, icon)
 scripts/             reproducible development and release workflows
 ```
 
@@ -279,7 +293,7 @@ repository for contributors but are intentionally not the focus of this page.
 The project constitution frames DICOMStudio as a foundation intended to
 evolve toward a broader medical imaging platform (for example PACS
 connectivity, multi-planar reconstruction, 3D rendering, and AI-assisted
-analysis). None of these capabilities are implemented as of v1.0.1; consult
+analysis). None of these capabilities are implemented as of v1.2.0; consult
 `IMPLEMENTATION_ROADMAP.md` for the authoritative, milestone-by-milestone plan
 before relying on any future-facing claim.
 
