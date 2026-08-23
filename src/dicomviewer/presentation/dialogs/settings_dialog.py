@@ -24,7 +24,9 @@ from PySide6.QtWidgets import (
 from dicomviewer.domain.image_processing import WINDOW_PRESETS
 from dicomviewer.domain.settings import (
     MAX_CACHE_SIZE,
+    MAX_CINE_FPS,
     MIN_CACHE_SIZE,
+    MIN_CINE_FPS,
     MeasurementSettings,
     Settings,
     SettingsError,
@@ -148,6 +150,18 @@ class SettingsDialog(QDialog):
         self._overlay_check.setObjectName("measurementOverlayCheck")
         self._overlay_check.setChecked(viewing.show_measurement_overlay)
         form.addRow("Show", self._overlay_check)
+
+        self._info_check = QCheckBox("Patient/study info", group)
+        self._info_check.setObjectName("infoOverlayCheck")
+        self._info_check.setChecked(viewing.show_info_overlay)
+        form.addRow("Show", self._info_check)
+
+        self._cine_spin = QSpinBox(group)
+        self._cine_spin.setObjectName("cineFpsSpin")
+        self._cine_spin.setRange(MIN_CINE_FPS, MAX_CINE_FPS)
+        self._cine_spin.setValue(viewing.cine_fps)
+        self._cine_spin.setToolTip("Cine playback speed in frames per second")
+        form.addRow("Cine playback (fps)", self._cine_spin)
         return group
 
     def _build_measurements_group(self, measurements: MeasurementSettings) -> QGroupBox:
@@ -176,6 +190,8 @@ class SettingsDialog(QDialog):
                     "smooth_scaling": self._smooth_check.isChecked(),
                     "show_statistics_overlay": self._statistics_check.isChecked(),
                     "show_measurement_overlay": self._overlay_check.isChecked(),
+                    "show_info_overlay": self._info_check.isChecked(),
+                    "cine_fps": self._cine_spin.value(),
                 }
             )
             measurements = MeasurementSettings.from_mapping({"color": self._color_edit.text()})
@@ -199,6 +215,8 @@ class SettingsDialog(QDialog):
         self._smooth_check.setChecked(settings.viewing.smooth_scaling)
         self._statistics_check.setChecked(settings.viewing.show_statistics_overlay)
         self._overlay_check.setChecked(settings.viewing.show_measurement_overlay)
+        self._info_check.setChecked(settings.viewing.show_info_overlay)
+        self._cine_spin.setValue(settings.viewing.cine_fps)
         self._color_edit.setText(settings.measurements.color)
 
     def _select_color(self) -> None:

@@ -58,7 +58,7 @@ def apply_window(rescaled: np.ndarray, center: float, width: float) -> np.ndarra
 
 
 def apply_photometric(normalized: np.ndarray, invert: bool) -> np.ndarray:
-    """Invert MONOCHROME1 images so bright tissues appear bright."""
+    """Invert a normalized frame so bright values become dark and vice versa."""
     if invert:
         return 1.0 - normalized
     return normalized

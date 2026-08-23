@@ -14,6 +14,8 @@ from PySide6.QtWidgets import (
 
 from dicomviewer.domain.image_processing import WINDOW_PRESETS
 from dicomviewer.domain.settings import (
+    MAX_CINE_FPS,
+    MIN_CINE_FPS,
     AppearanceSettings,
     LoggingSettings,
     MeasurementSettings,
@@ -86,11 +88,22 @@ def test_rendering_toggles_reflect_settings(qapp: QApplication) -> None:
         smooth_scaling=False,
         show_statistics_overlay=False,
         show_measurement_overlay=True,
+        show_info_overlay=False,
     )
     dialog, _ = _make_dialog(viewing=viewing)
     assert not dialog.findChild(QCheckBox, "smoothCheck").isChecked()
     assert not dialog.findChild(QCheckBox, "statisticsCheck").isChecked()
     assert dialog.findChild(QCheckBox, "measurementOverlayCheck").isChecked()
+    assert not dialog.findChild(QCheckBox, "infoOverlayCheck").isChecked()
+
+
+def test_cine_fps_spin_is_bounded_and_seeded(qapp: QApplication) -> None:
+    dialog, _ = _make_dialog(viewing=ViewingSettings(cine_fps=30))
+    spin = dialog.findChild(QSpinBox, "cineFpsSpin")
+    assert spin is not None
+    assert spin.minimum() == MIN_CINE_FPS
+    assert spin.maximum() == MAX_CINE_FPS
+    assert spin.value() == 30
 
 
 def test_colour_edit_reflects_settings(qapp: QApplication) -> None:
@@ -123,6 +136,8 @@ def test_accept_applies_the_selected_preferences(qapp: QApplication) -> None:
     dialog.findChild(QSpinBox, "cacheSpin").setValue(5)
     dialog.findChild(QCheckBox, "smoothCheck").setChecked(False)
     dialog.findChild(QCheckBox, "statisticsCheck").setChecked(False)
+    dialog.findChild(QCheckBox, "infoOverlayCheck").setChecked(False)
+    dialog.findChild(QSpinBox, "cineFpsSpin").setValue(30)
     dialog.findChild(QLineEdit, "colorEdit").setText("#ff0000")
     ok = dialog.findChild(QDialogButtonBox).button(QDialogButtonBox.StandardButton.Ok)
     ok.click()
@@ -134,6 +149,8 @@ def test_accept_applies_the_selected_preferences(qapp: QApplication) -> None:
                 smooth_scaling=False,
                 show_statistics_overlay=False,
                 show_measurement_overlay=True,
+                show_info_overlay=False,
+                cine_fps=30,
             ),
             MeasurementSettings(color="#ff0000"),
         )
@@ -154,7 +171,12 @@ def test_accept_rejects_an_invalid_colour(qapp: QApplication) -> None:
 def test_reset_restores_defaults_into_the_controls(qapp: QApplication) -> None:
     reset_settings = _settings(
         appearance=AppearanceSettings(theme="light"),
-        viewing=ViewingSettings(default_window_preset="CT Lung", max_cache_size=7),
+        viewing=ViewingSettings(
+            default_window_preset="CT Lung",
+            max_cache_size=7,
+            show_info_overlay=False,
+            cine_fps=45,
+        ),
         measurements=MeasurementSettings(color="#00ff00"),
     )
     dialog = SettingsDialog(
@@ -173,4 +195,6 @@ def test_reset_restores_defaults_into_the_controls(qapp: QApplication) -> None:
     assert dialog.findChild(QComboBox, "themeCombo").currentText() == "Light"
     assert dialog.findChild(QComboBox, "presetCombo").currentText() == "CT Lung"
     assert dialog.findChild(QSpinBox, "cacheSpin").value() == 7
+    assert not dialog.findChild(QCheckBox, "infoOverlayCheck").isChecked()
+    assert dialog.findChild(QSpinBox, "cineFpsSpin").value() == 45
     assert dialog.findChild(QLineEdit, "colorEdit").text() == "#00ff00"

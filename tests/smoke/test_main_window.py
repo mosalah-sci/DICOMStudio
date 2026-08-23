@@ -18,9 +18,11 @@ from PySide6.QtWidgets import (
 
 from dicomviewer.application.discovery import DiscoveryError
 from dicomviewer.application.export import ExportError
+from dicomviewer.domain.annotation import AnnotationKind
 from dicomviewer.domain.export import ExportFormat
+from dicomviewer.domain.image_processing import WindowPreset
 from dicomviewer.domain.measurement import MeasurementKind
-from dicomviewer.domain.settings import MeasurementSettings, ViewingSettings
+from dicomviewer.domain.settings import MeasurementSettings, PresetsSettings, ViewingSettings
 from dicomviewer.domain.studies import Image, Patient, Series, Study, StudyTree
 from dicomviewer.presentation.actions.action_ids import ActionId
 from dicomviewer.presentation.widgets.sidebar_drawer import (
@@ -1080,3 +1082,139 @@ def test_clicking_the_arrow_runs_a_slide_animation(
     assert drawer.width() == DRAWER_RAIL_WIDTH
     window.close()
     qapp.processEvents()
+
+
+def _multi_slice_tree() -> StudyTree:
+    images = tuple(Image(Path(f"{n}.dcm"), n) for n in range(1, 4))
+    series = Series("s-ct", "CT", 1, "Chest", images)
+    study = Study("st-1", "20260801", "1", "Chest exam", (series,))
+    patient = Patient("p-1", "DOE^JOHN", "19800101", "M", (study,))
+    return StudyTree(Path("."), (patient,))
+
+
+def test_orientation_actions_drive_the_viewer(
+    make_window: Callable[..., MainWindow],
+    qapp: QApplication,
+    tmp_path: Path,
+) -> None:
+    window = make_window(study_scanner=FakeStudyScanner(tree=_sample_tree()))
+    _load_series(window, qapp, tmp_path)
+    panel = window._viewer_panel
+
+    def viewport():
+        return panel._viewer.viewport
+
+    window.action(ActionId.ROTATE_CW).trigger()
+    assert viewport().rotation == 90
+    window.action(ActionId.ROTATE_CCW).trigger()
+    assert viewport().rotation == 0
+    window.action(ActionId.FLIP_HORIZONTAL).trigger()
+    assert viewport().flip_h is True
+    window.action(ActionId.FLIP_VERTICAL).trigger()
+    assert viewport().flip_v is True
+    window.action(ActionId.INVERT).trigger()
+    assert viewport().invert is True
+
+    reset = window.action(ActionId.RESET_VIEW)
+    reset.trigger()
+    fresh = viewport()
+    assert fresh.rotation == 0 and not fresh.flip_h and not fresh.flip_v
+
+
+def test_annotation_actions_are_exclusive_with_measure(
+    make_window: Callable[..., MainWindow],
+    qapp: QApplication,
+    tmp_path: Path,
+) -> None:
+    window = make_window(study_scanner=FakeStudyScanner(tree=_sample_tree()))
+    _load_series(window, qapp, tmp_path)
+    measure = window.action(ActionId.MEASURE)
+    point = window.action(ActionId.ANNOTATE_POINT)
+    arrow = window.action(ActionId.ANNOTATE_ARROW)
+
+    measure.trigger()
+    assert window._viewer_panel.measure_mode is MeasurementKind.DISTANCE
+    point.trigger()
+    assert point.isChecked()
+    assert not measure.isChecked()
+    assert window._viewer_panel.measure_mode is None
+    assert window._viewer_panel.annotation_mode is AnnotationKind.POINT
+
+    arrow.trigger()
+    assert arrow.isChecked()
+    assert not point.isChecked()
+    assert window._viewer_panel.annotation_mode is AnnotationKind.ARROW
+
+    arrow.trigger()
+    assert window._viewer_panel.annotation_mode is None
+
+
+def test_play_cine_action_is_gated_and_toggles(
+    make_window: Callable[..., MainWindow],
+    qapp: QApplication,
+    tmp_path: Path,
+) -> None:
+    window = make_window(study_scanner=FakeStudyScanner(tree=_multi_slice_tree()))
+    play = window.action(ActionId.PLAY_CINE)
+    assert not play.isEnabled()
+
+    _load_series(window, qapp, tmp_path)
+    assert play.isEnabled()
+    play.trigger()
+    assert window._viewer_panel.is_playing
+    assert play.isChecked()
+    # The timer must actually tick and keep playing (regression: the driver
+    # once reported a slice count of one, so the first tick self-paused).
+    advanced = pump_until(qapp, lambda: window._viewer_panel.current_slice != 0, timeout=4.0)
+    assert advanced
+    assert window._viewer_panel.is_playing
+    play.trigger()
+    assert not window._viewer_panel.is_playing
+    assert not play.isChecked()
+
+
+def test_single_slice_series_keeps_cine_disabled(
+    make_window: Callable[..., MainWindow],
+    qapp: QApplication,
+    tmp_path: Path,
+) -> None:
+    window = make_window(study_scanner=FakeStudyScanner(tree=_sample_tree()))
+    _load_series(window, qapp, tmp_path)
+    assert not window.action(ActionId.PLAY_CINE).isEnabled()
+
+
+def test_series_activation_feeds_the_info_overlay(
+    make_window: Callable[..., MainWindow],
+    qapp: QApplication,
+    tmp_path: Path,
+) -> None:
+    window = make_window(study_scanner=FakeStudyScanner(tree=_sample_tree()))
+    _load_series(window, qapp, tmp_path)
+    info = window._viewer_panel._viewer._series_info
+    assert info is not None
+    assert info.patient_name == "DOE^JOHN"
+    assert info.patient_id == "p-1"
+    assert info.study_description == "Chest exam"
+    assert info.modality == "CT"
+    assert info.series_number == 1
+
+
+def test_custom_presets_publish_into_the_menu(
+    make_window: Callable[..., MainWindow],
+    qapp: QApplication,
+    tmp_path: Path,
+) -> None:
+    window = make_window(study_scanner=FakeStudyScanner(tree=_sample_tree()))
+    custom = WindowPreset("My Aorta", 300.0, 400.0)
+    window._apply_custom_presets(PresetsSettings(custom=(custom,)))
+    names = [action.text() for action in window._preset_actions]
+    assert "My Aorta" in names
+    saved = window._settings_manager.current_settings.presets
+    assert saved.find("My Aorta") == custom
+
+    _load_series(window, qapp, tmp_path)
+    aorta = next(a for a in window._preset_actions if a.text() == "My Aorta")
+    assert aorta.isEnabled()
+    aorta.trigger()
+    assert window._viewer_panel._viewer.viewport.window_center == 300.0
+    assert "My Aorta" in window.statusBar().currentMessage()

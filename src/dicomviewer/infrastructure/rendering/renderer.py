@@ -41,23 +41,30 @@ class NumpyViewRenderer:
     def _render_rgba(self, pixels: PixelArray, viewport: Viewport) -> np.ndarray:
         """Render the frame to an RGBA array without error wrapping."""
         if pixels.is_color:
-            return self._render_color(pixels)
+            return self._render_color(pixels, viewport)
         return self._render_monochrome(pixels, viewport)
 
     def _render_monochrome(self, pixels: PixelArray, viewport: Viewport) -> np.ndarray:
-        """Render a grayscale frame through rescale, window and inversion."""
+        """Render a grayscale frame through rescale, window and inversion.
+
+        MONOCHROME1 flips the stored polarity; a user-requested display
+        inversion XORs with it so the two toggles cancel out exactly.
+        """
         rescaled = pipeline.rescale(pixels.pixels, pixels.rescale_slope, pixels.rescale_intercept)
         center, width = pipeline.effective_window(
             rescaled, viewport.window_center, viewport.window_width
         )
         normalized = pipeline.apply_window(rescaled, center, width)
-        normalized = pipeline.apply_photometric(normalized, pixels.is_monochrome1)
+        normalized = pipeline.apply_photometric(
+            normalized, pixels.is_monochrome1 != viewport.invert
+        )
         normalized = self._apply_pipeline(normalized)
         return pipeline.to_rgba_grayscale(normalized)
 
-    def _render_color(self, pixels: PixelArray) -> np.ndarray:
-        """Render a color frame by normalizing its channels."""
+    def _render_color(self, pixels: PixelArray, viewport: Viewport) -> np.ndarray:
+        """Render a color frame by normalizing and optionally inverting it."""
         normalized = pipeline.normalize_color(pixels.pixels)
+        normalized = pipeline.apply_photometric(normalized, viewport.invert)
         normalized = self._apply_pipeline(normalized)
         return pipeline.to_rgba_color(normalized)
 

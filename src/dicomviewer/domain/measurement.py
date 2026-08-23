@@ -38,6 +38,9 @@ _POINT_COUNTS: dict[MeasurementKind, int] = {
 }
 
 
+DEFAULT_HIT_TOLERANCE = 8.0
+
+
 @dataclass(frozen=True)
 class Measurement:
     """One completed measurement with its defining points.
@@ -109,3 +112,38 @@ def angle_degrees(measurement: Measurement) -> float:
     if difference > math.pi:
         difference = 2.0 * math.pi - difference
     return math.degrees(difference)
+
+
+def distance_to_segment(point: Point, start: Point, end: Point) -> float:
+    """Return the Euclidean distance from ``point`` to a segment."""
+    dx = end.x - start.x
+    dy = end.y - start.y
+    length_squared = dx * dx + dy * dy
+    if length_squared <= 0.0:
+        return point.distance_to(start)
+    t = ((point.x - start.x) * dx + (point.y - start.y) * dy) / length_squared
+    clamped = min(max(t, 0.0), 1.0)
+    nearest = Point(start.x + clamped * dx, start.y + clamped * dy)
+    return point.distance_to(nearest)
+
+
+def distance_to_measurement(measurement: Measurement, point: Point) -> float:
+    """Return the hit-test distance from ``point`` to ``measurement``.
+
+    Distances are matched by proximity to the segment or its endpoints;
+    angles by proximity to either ray or the shared vertex.
+    """
+    points = measurement.points
+    if measurement.kind is MeasurementKind.DISTANCE:
+        start, end = points
+        return min(
+            point.distance_to(start),
+            point.distance_to(end),
+            distance_to_segment(point, start, end),
+        )
+    vertex, ray1, ray2 = points
+    return min(
+        point.distance_to(vertex),
+        distance_to_segment(point, vertex, ray1),
+        distance_to_segment(point, vertex, ray2),
+    )

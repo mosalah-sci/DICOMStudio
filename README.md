@@ -20,7 +20,7 @@ milestone roadmap.
   <img src="assets/screenshots/main-viewer.png" alt="DICOMStudio main interface: Study Explorer, Image Viewer and Metadata panels with a loaded CT study">
 </p>
 
-> **Status:** Milestone 14 — DICOM Study Workflow (v1.2.0)
+> **Status:** Release v1.3.0
 
 ---
 
@@ -43,11 +43,14 @@ diagnostic workstation. See [Scope & Disclaimer](#scope--disclaimer).
 | **Study Discovery** | Recursive, background folder scanning with header-only parsing and live progress; malformed or unrelated files are skipped gracefully. |
 | **Study Explorer** | Patient / Study / Series tree with modality, image counts, study dates, tooltips, per-node context menus, and a compact thumbnail-grid preview of the selected series with lazy image generation. |
 | **Image Viewer** | Full-resolution DICOM pixel decoding, grayscale and RGB rendering, MONOCHROME1/2 inversion, Fit to Window, Actual Size, and Zoom In/Out. |
-| **Window / Level** | Right-drag window/level adjustment, automatic reset, and one-click clinical presets (CT Brain, Stroke, Bone, Lung, Abdomen, Mediastinum, Soft Tissue, Temporal Bones). |
-| **Navigation** | Mouse-wheel and keyboard slice navigation, panning, trackpad scrolling, and viewer shortcuts (F fit, R reset view, W reset window/level, M measure). |
+| **Orientation** | Rotate 90° CW/CCW (Ctrl+R / Ctrl+Shift+R), flip horizontal/vertical (Ctrl+H / Ctrl+Shift+H) and invert grayscale (Ctrl+U); overlays, mouse interaction and exports follow the transform. |
+| **Window / Level** | Right-drag window/level adjustment, automatic reset, one-click clinical presets (CT Brain, Stroke, Bone, Lung, Abdomen, Mediastinum, Soft Tissue, Temporal Bones), plus user-defined custom presets with a manage dialog. |
+| **Navigation** | Mouse-wheel and keyboard slice navigation, a slice navigation bar (slider, prev/next, editable current-slice/total control), cine playback (Space or the navigation-bar play button) at a configurable rate, panning, trackpad scrolling, and viewer shortcuts (F fit, R reset view, W reset window/level, M measure). |
 | **Metadata Explorer** | Grouped, searchable DICOM header inspection with Property and Value columns, and copy-to-clipboard for tags and values. |
 | **DICOM Dataset Inspector** | Searchable, **read-only** table of every raw element (Tag, Keyword, VR, Value — public and private) for the current image, via Tools → Inspect DICOM Dataset (Ctrl+I) or the Study Explorer context menu. Does not edit tags, anonymize datasets, or provide PACS/networking. |
 | **Measurements** | Distance and angle measurement tools with per-slice overlays, using DICOM Pixel Spacing when available. |
+| **Annotations** | Point markers, arrows and text notes with click-to-select and right-click or Delete to remove, stored per slice. |
+| **Patient/Study Info Overlay** | On-image patient demographics and study/series details, toggleable from the View menu or Settings. |
 | **Statistics & Histogram** | Pixel statistics (min/max/mean/std) and a live mini histogram per slice. |
 | **Export** | PNG/JPEG export (Ctrl+S / Ctrl+E), screenshot capture, and copy-to-clipboard of the current view, including overlays. |
 | **Workspace** | Persisted sidebar visibility and widths, fullscreen viewer mode (F11, Esc to exit), and drag & drop loading of folders or DICOM files. |
@@ -97,7 +100,7 @@ Both are built from the same frozen application — no Python installation is
 required for either.
 
 > **Get the latest build:** [GitHub Releases](https://github.com/mosalah-sci/DICOMStudio/releases/latest)
-> — current version: **v1.2.0**.
+> — current version: **v1.3.0**.
 >
 > *(If a release asset you need is not published yet, build the installer
 > and portable archive locally — see [Installation → For
@@ -217,20 +220,20 @@ error handling, versioning, testing strategy, theming, and Windows packaging.
 
 ## Quality & Testing
 
-Verified state at the **v1.2.0** release:
+Verified state at the **v1.3.0** release:
 
 | Check | Result |
 | --- | --- |
-| Automated tests (`pytest`) | 456 passed |
+| Automated tests (`pytest`) | 586 passed |
 | Formatting (Black) | Clean |
 | Linting (Ruff) | Clean |
 | Static typing (Pyright, strict) | 0 errors, 0 warnings |
-| Package build (`uv build`) | Successful |
-| Windows standalone executable | Verified |
-| Windows installer | Verified |
-| Portable ZIP | Verified |
-| Real CT dataset testing | Completed |
-| End-to-end feature smoke checks | 21 / 21 passed |
+| Package build (`uv build`) | Successful (v1.3.0 wheel + sdist) |
+| Windows standalone executable | Not rebuilt since v1.2.0 |
+| Windows installer | Not rebuilt since v1.2.0 |
+| Portable ZIP | Not rebuilt since v1.2.0 |
+| Real CT dataset testing | Completed (offscreen end-to-end run, 24/24 checks) |
+| End-to-end feature smoke checks | 24 / 24 passed |
 
 - Unit, integration and smoke tests live under `tests/` and run with `pytest`
   (`.\scripts\test.ps1`).
@@ -271,7 +274,7 @@ repository for contributors but are intentionally not the focus of this page.
 
 ## Roadmap
 
-### Completed (through v1.2.0)
+### Completed (through v1.3.0)
 
 - Application shell, docking workspace, and theming
 - DICOM discovery, background scanning, and study organization
@@ -287,13 +290,16 @@ repository for contributors but are intentionally not the focus of this page.
 - Workspace persistence, fullscreen viewer, drag & drop loading (v1.1)
 - Study Explorer context menus, DICOM Dataset Inspector, and the compact
   thumbnail-grid series preview (v1.2)
+- Viewport orientation controls, annotations, custom window presets,
+  slice navigation bar with cine playback, and the patient/study info
+  overlay (v1.3)
 
 ### Planned / Future
 
 The project constitution frames DICOMStudio as a foundation intended to
 evolve toward a broader medical imaging platform (for example PACS
 connectivity, multi-planar reconstruction, 3D rendering, and AI-assisted
-analysis). None of these capabilities are implemented as of v1.2.0; consult
+analysis). None of these capabilities are implemented as of v1.3.0; consult
 `IMPLEMENTATION_ROADMAP.md` for the authoritative, milestone-by-milestone plan
 before relying on any future-facing claim.
 

@@ -14,18 +14,24 @@ from pathlib import Path
 from typing import Any, cast
 
 from dicomviewer.domain.exceptions import DicomViewerError
-from dicomviewer.domain.image_processing import find_window_preset
+from dicomviewer.domain.image_processing import WindowPreset, find_window_preset
 
 VALID_LOG_LEVELS = frozenset({"TRACE", "DEBUG", "INFO", "SUCCESS", "WARNING", "ERROR", "CRITICAL"})
 VALID_THEMES = frozenset({"dark", "light"})
 MAX_RECENT_FOLDERS = 8
 MIN_CACHE_SIZE = 1
 MAX_CACHE_SIZE = 16
+# Cine playback speed bounds in frames per second.
+MIN_CINE_FPS = 1
+MAX_CINE_FPS = 60
 # Sidebar width bounds (pixels). The app persists live dock widths here, so
 # values outside this range are clamped to keep the panels usable on any
 # monitor size rather than being rejected.
 MIN_SIDEBAR_WIDTH = 120
 MAX_SIDEBAR_WIDTH = 1200
+# Custom window presets are user-defined (center, width) combinations.
+MAX_CUSTOM_PRESETS = 32
+_MIN_PRESET_WIDTH = 1e-3
 _HEX_COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
 
 
@@ -109,6 +115,8 @@ class ViewingSettings:
     smooth_scaling: bool = True
     show_statistics_overlay: bool = True
     show_measurement_overlay: bool = True
+    show_info_overlay: bool = True
+    cine_fps: int = 15
 
     @classmethod
     def from_mapping(cls, data: Mapping[str, Any]) -> ViewingSettings:
@@ -123,6 +131,10 @@ class ViewingSettings:
             show_measurement_overlay=_validate_bool(
                 "show_measurement_overlay", data.get("show_measurement_overlay", True)
             ),
+            show_info_overlay=_validate_bool(
+                "show_info_overlay", data.get("show_info_overlay", True)
+            ),
+            cine_fps=_validate_cine_fps(data.get("cine_fps", 15)),
         )
 
     def to_mapping(self) -> dict[str, Any]:
@@ -133,7 +145,51 @@ class ViewingSettings:
             "smooth_scaling": self.smooth_scaling,
             "show_statistics_overlay": self.show_statistics_overlay,
             "show_measurement_overlay": self.show_measurement_overlay,
+            "show_info_overlay": self.show_info_overlay,
+            "cine_fps": self.cine_fps,
         }
+
+
+@dataclass(frozen=True)
+class PresetsSettings:
+    """User-defined window presets persisted across sessions.
+
+    Custom presets live alongside the built-in clinical presets and are
+    addressed by name, so entries are de-duplicated by name (first wins)
+    and capped at :data:`MAX_CUSTOM_PRESETS`.
+    """
+
+    custom: tuple[WindowPreset, ...] = ()
+
+    @classmethod
+    def from_mapping(cls, data: Mapping[str, Any]) -> PresetsSettings:
+        """Build settings from a TOML ``[presets]`` mapping."""
+        return cls(custom=_validate_custom_presets(data.get("custom", ())))
+
+    def to_mapping(self) -> dict[str, Any]:
+        """Return the settings as a plain TOML-serializable mapping."""
+        return {
+            "custom": [
+                {"name": preset.name, "center": preset.center, "width": preset.width}
+                for preset in self.custom
+            ]
+        }
+
+    def find(self, name: str) -> WindowPreset | None:
+        """Return the custom preset whose name matches, or ``None``."""
+        for preset in self.custom:
+            if preset.name == name:
+                return preset
+        return None
+
+    def upsert(self, preset: WindowPreset) -> PresetsSettings:
+        """Return a copy with ``preset`` added, or replacing its namesake."""
+        remaining = tuple(item for item in self.custom if item.name != preset.name)
+        return PresetsSettings(custom=(*remaining, preset)[:MAX_CUSTOM_PRESETS])
+
+    def remove(self, name: str) -> PresetsSettings:
+        """Return a copy without the preset named ``name``."""
+        return PresetsSettings(custom=tuple(item for item in self.custom if item.name != name))
 
 
 @dataclass(frozen=True)
@@ -201,6 +257,7 @@ class Settings:
     viewing: ViewingSettings = ViewingSettings()
     measurements: MeasurementSettings = MeasurementSettings()
     workspace: WorkspaceSettings = WorkspaceSettings()
+    presets: PresetsSettings = PresetsSettings()
 
     @classmethod
     def from_mapping(cls, data: Mapping[str, Any]) -> Settings:
@@ -241,6 +298,12 @@ class Settings:
             if workspace_data is not None
             else WorkspaceSettings()
         )
+        presets_data = as_str_mapping(data.get("presets"))
+        presets_settings = (
+            PresetsSettings.from_mapping(presets_data)
+            if presets_data is not None
+            else PresetsSettings()
+        )
         return cls(
             logging=logging_settings,
             appearance=appearance_settings,
@@ -248,6 +311,7 @@ class Settings:
             viewing=viewing_settings,
             measurements=measurements_settings,
             workspace=workspace_settings,
+            presets=presets_settings,
         )
 
     def to_mapping(self) -> dict[str, Any]:
@@ -259,6 +323,7 @@ class Settings:
             "viewing": self.viewing.to_mapping(),
             "measurements": self.measurements.to_mapping(),
             "workspace": self.workspace.to_mapping(),
+            "presets": self.presets.to_mapping(),
         }
 
 
@@ -341,3 +406,46 @@ def _validate_non_empty(field: str, value: Any) -> str:
     if not isinstance(value, str) or not value.strip():
         raise SettingsError(f"Invalid value for '{field}': {value!r}")
     return value
+
+
+def _validate_cine_fps(value: Any) -> int:
+    """Validate and clamp the cine playback speed in frames per second."""
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise SettingsError(f"Invalid cine playback speed: {value!r}")
+    return min(MAX_CINE_FPS, max(MIN_CINE_FPS, value))
+
+
+def _validate_custom_presets(value: Any) -> tuple[WindowPreset, ...]:
+    """Normalize and validate the list of user-defined window presets.
+
+    Entries with blank names, non-numeric geometry or non-positive widths
+    are rejected; duplicate names are de-duplicated (first wins) and the
+    list is capped at :data:`MAX_CUSTOM_PRESETS`.
+    """
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
+        raise SettingsError(f"Invalid custom presets list: {value!r}")
+    presets: list[WindowPreset] = []
+    seen: set[str] = set()
+    for item in cast(Sequence[Any], value):
+        if not isinstance(item, Mapping):
+            raise SettingsError(f"Invalid custom preset entry: {item!r}")
+        entry = cast(Mapping[str, Any], item)
+        name = entry.get("name")
+        center = entry.get("center")
+        width = entry.get("width")
+        if not isinstance(name, str) or not name.strip():
+            raise SettingsError(f"Invalid custom preset name: {name!r}")
+        name = name.strip()
+        if (
+            isinstance(center, bool)
+            or not isinstance(center, (int, float))
+            or isinstance(width, bool)
+            or not isinstance(width, (int, float))
+            or width < _MIN_PRESET_WIDTH
+        ):
+            raise SettingsError(f"Invalid window geometry for preset '{name}'")
+        if name in seen:
+            continue
+        seen.add(name)
+        presets.append(WindowPreset(name=name, center=float(center), width=float(width)))
+    return tuple(presets[:MAX_CUSTOM_PRESETS])

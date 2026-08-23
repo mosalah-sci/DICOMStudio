@@ -33,6 +33,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from dicomviewer.application.annotation import AnnotationCollection
 from dicomviewer.application.discovery import StudyScanner, ThumbnailService
 from dicomviewer.application.export import ExportError, ImageExporter
 from dicomviewer.application.inspection import TagInspector
@@ -42,6 +43,7 @@ from dicomviewer.application.processing import ImageAnalyzer
 from dicomviewer.application.theme_manager import ThemeManager
 from dicomviewer.application.viewing import PixelDecoder, ViewRenderer
 from dicomviewer.application.window_state_store import WindowState, WindowStateStore
+from dicomviewer.domain.annotation import AnnotationKind
 from dicomviewer.domain.export import ExportFormat
 from dicomviewer.domain.image_processing import (
     WINDOW_PRESETS,
@@ -51,6 +53,7 @@ from dicomviewer.domain.image_processing import (
 from dicomviewer.domain.measurement import MeasurementKind
 from dicomviewer.domain.settings import (
     MeasurementSettings,
+    PresetsSettings,
     Settings,
     SettingsError,
     ViewingSettings,
@@ -60,11 +63,14 @@ from dicomviewer.domain.studies import Image, Series, StudyTree
 from dicomviewer.presentation.actions.action_catalog import ActionCatalog
 from dicomviewer.presentation.actions.action_ids import ActionId
 from dicomviewer.presentation.actions.assembly import (
+    MenuHandles,
     create_toolbar,
     populate_menu_bar,
     populate_recent_folders_menu,
+    refresh_window_presets_menu,
 )
 from dicomviewer.presentation.dialogs.about_dialog import AboutDialog
+from dicomviewer.presentation.dialogs.preset_manager_dialog import PresetManagerDialog
 from dicomviewer.presentation.dialogs.settings_dialog import SettingsDialog
 from dicomviewer.presentation.dialogs.tag_inspector_dialog import TagInspectorDialog
 from dicomviewer.presentation.feedback.error_presenter import ErrorPresenter
@@ -76,6 +82,7 @@ from dicomviewer.presentation.widgets.metadata_panel import MetadataPanel
 from dicomviewer.presentation.widgets.sidebar_drawer import SidebarDrawer
 from dicomviewer.presentation.widgets.status_bar import StatusBar
 from dicomviewer.presentation.widgets.study_explorer_panel import StudyExplorerPanel
+from dicomviewer.presentation.widgets.viewer_overlays import SeriesOverlayInfo
 from dicomviewer.presentation.widgets.viewer_panel import ViewerPanel
 from dicomviewer.presentation.workers.scan_worker import StudyScanWorker
 from dicomviewer.shared.constants import SIDEBAR_WIDTHS
@@ -168,7 +175,9 @@ class MainWindow(QMainWindow):
         self._scan_relay: _ScanRelay | None = None
         self._scan_generation = 0
         self._current_series: Series | None = None
+        self._study_tree: StudyTree | None = None
         self._preset_actions: tuple[QAction, ...] = ()
+        self._presets_menu: QMenu | None = None
         self._recent_menu: QMenu | None = None
         self._error_presenter = error_presenter or ErrorPresenter()
         self._fullscreen_chrome: dict[QWidget, bool] = {}
@@ -182,13 +191,17 @@ class MainWindow(QMainWindow):
         self._catalog = self._build_catalog()
         self._status_bar = StatusBar(version)
         self.setStatusBar(self._status_bar)
-        self._preset_actions = populate_menu_bar(
+        handles: MenuHandles = populate_menu_bar(
             self.menuBar(),
             self._catalog,
             window_presets=WINDOW_PRESETS,
             on_window_preset=self._apply_window_preset,
             on_clear_measurements=self._clear_measurements,
+            on_clear_annotations=self._clear_annotations,
+            on_manage_presets=self._manage_window_presets,
         )
+        self._preset_actions = handles.preset_actions
+        self._presets_menu = handles.presets_menu
         self._toolbar = create_toolbar(self, self._catalog)
         self.addToolBar(self._toolbar)
         self._build_recent_folders_menu()
@@ -232,8 +245,20 @@ class MainWindow(QMainWindow):
                 ActionId.ZOOM_OUT: self._viewer_panel.zoom_out,
                 ActionId.RESET_VIEW: self._viewer_panel.reset_view,
                 ActionId.WINDOW_LEVEL: self._viewer_panel.reset_window_level,
+                ActionId.ROTATE_CW: self._viewer_panel.rotate_cw,
+                ActionId.ROTATE_CCW: self._viewer_panel.rotate_ccw,
+                ActionId.FLIP_HORIZONTAL: self._viewer_panel.flip_horizontally,
+                ActionId.FLIP_VERTICAL: self._viewer_panel.flip_vertically,
+                ActionId.INVERT: self._viewer_panel.toggle_invert,
+                ActionId.PLAY_CINE: self._viewer_panel.toggle_playback,
                 ActionId.MEASURE: self._toggle_measure,
+                ActionId.ANNOTATE_POINT: self._annotate_point,
+                ActionId.ANNOTATE_ARROW: self._annotate_arrow,
+                ActionId.ANNOTATE_TEXT: self._annotate_text,
                 ActionId.CLEAR_MEASUREMENTS: self._clear_measurements,
+                ActionId.CLEAR_ANNOTATIONS: self._clear_annotations,
+                ActionId.TOGGLE_INFO_OVERLAY: self._toggle_info_overlay,
+                ActionId.MANAGE_WINDOW_PRESETS: self._manage_window_presets,
                 ActionId.EXPORT_IMAGE: self._export_image,
                 ActionId.SCREENSHOT: self._capture_screenshot,
                 ActionId.COPY_IMAGE: self._copy_image,
@@ -273,6 +298,9 @@ class MainWindow(QMainWindow):
         self._viewer_panel.slice_changed.connect(self._on_slice_changed)
         self._viewer_panel.measurements_changed.connect(self._on_measurements_changed)
         self._viewer_panel.measure_mode_changed.connect(self._sync_measure_action)
+        self._viewer_panel.annotations_changed.connect(self._on_annotations_changed)
+        self._viewer_panel.annotation_mode_changed.connect(self._sync_annotation_actions)
+        self._viewer_panel.playback_changed.connect(self._on_playback_changed)
         self._viewer_panel.open_folder_requested.connect(self._open_folder)
         self._viewer_panel.escape_pressed.connect(self._on_viewer_escape)
 
@@ -446,6 +474,7 @@ class MainWindow(QMainWindow):
         """
         if generation != self._scan_generation:
             return
+        self._study_tree = tree
         self._study_explorer_panel.set_study_tree(tree)
         if not tree.has_content():
             self._status_bar.showMessage(f"No DICOM studies found in {folder}.")
@@ -485,11 +514,51 @@ class MainWindow(QMainWindow):
     def _on_series_activated(self, series: Series, index: int) -> None:
         """Display the activated series in the viewer and metadata panel."""
         self._current_series = series
+        self._update_series_info(series)
         self._viewer_panel.load_series(series.images, index)
         self._metadata_panel.show_series(series.images, index)
         self._apply_default_window_preset()
         self._status_bar.showMessage(
             f"Loaded {series.modality or 'series'} with {series.image_count} images."
+        )
+
+    def _update_series_info(self, series: Series) -> None:
+        """Build and push the info overlay details for ``series``.
+
+        The domain model does not link a series back to its study, so the
+        patient/study rows are recovered by walking the last scanned tree;
+        series activated outside a scan (tests, future loaders) simply show
+        their own metadata.
+        """
+        patient_name = patient_id = birth_date = patient_sex = study_description = ""
+        tree = self._study_tree
+        if tree is not None:
+            for patient in tree.patients:
+                for study in patient.studies:
+                    if any(
+                        member.series_instance_uid == series.series_instance_uid
+                        for member in study.series
+                    ):
+                        patient_name = patient.name
+                        patient_id = patient.patient_id
+                        birth_date = patient.birth_date
+                        patient_sex = patient.sex
+                        study_description = study.description
+                        break
+                else:
+                    continue
+                break
+        self._viewer_panel.set_series_info(
+            SeriesOverlayInfo(
+                patient_name=patient_name,
+                patient_id=patient_id,
+                birth_date=birth_date,
+                patient_sex=patient_sex,
+                study_description=study_description,
+                series_description=series.description,
+                modality=series.modality,
+                series_number=series.series_number,
+            )
         )
 
     def _on_slice_changed(self, index: int, count: int) -> None:
@@ -529,13 +598,25 @@ class MainWindow(QMainWindow):
             ActionId.ZOOM_OUT,
             ActionId.RESET_VIEW,
             ActionId.WINDOW_LEVEL,
+            ActionId.ROTATE_CW,
+            ActionId.ROTATE_CCW,
+            ActionId.FLIP_HORIZONTAL,
+            ActionId.FLIP_VERTICAL,
+            ActionId.INVERT,
             ActionId.MEASURE,
+            ActionId.ANNOTATE_POINT,
+            ActionId.ANNOTATE_ARROW,
+            ActionId.ANNOTATE_TEXT,
             ActionId.EXPORT_IMAGE,
             ActionId.SCREENSHOT,
             ActionId.COPY_IMAGE,
             ActionId.INSPECT_DICOM,
         ):
             self._catalog.action(action_id).setEnabled(has_image)
+        play_enabled = has_image and self._viewer_panel.slice_count > 1
+        if not play_enabled:
+            self._viewer_panel.pause_playback()
+        self._catalog.action(ActionId.PLAY_CINE).setEnabled(play_enabled)
         for action in self._preset_actions:
             action.setEnabled(has_image)
 
@@ -553,6 +634,103 @@ class MainWindow(QMainWindow):
         action = self._catalog.action(ActionId.MEASURE)
         if action.isChecked() != checked:
             action.setChecked(checked)
+
+    def _annotate_point(self) -> None:
+        """Toggle the point annotation tool on or off."""
+        self._toggle_annotation_mode(AnnotationKind.POINT, ActionId.ANNOTATE_POINT)
+
+    def _annotate_arrow(self) -> None:
+        """Toggle the arrow annotation tool on or off."""
+        self._toggle_annotation_mode(AnnotationKind.ARROW, ActionId.ANNOTATE_ARROW)
+
+    def _annotate_text(self) -> None:
+        """Toggle the text annotation tool on or off."""
+        self._toggle_annotation_mode(AnnotationKind.TEXT, ActionId.ANNOTATE_TEXT)
+
+    def _toggle_annotation_mode(self, kind: AnnotationKind, action_id: ActionId) -> None:
+        """Enter ``kind`` when its action was checked, leave it otherwise."""
+        action = self._catalog.action(action_id)
+        self._viewer_panel.set_annotation_mode(kind if action.isChecked() else None)
+
+    def _sync_annotation_actions(self, kind: object) -> None:
+        """Keep the three annotate actions checked to match the active tool."""
+        expected = {
+            ActionId.ANNOTATE_POINT: AnnotationKind.POINT,
+            ActionId.ANNOTATE_ARROW: AnnotationKind.ARROW,
+            ActionId.ANNOTATE_TEXT: AnnotationKind.TEXT,
+        }
+        for action_id, mode in expected.items():
+            action = self._catalog.action(action_id)
+            checked = kind == mode
+            if action.isChecked() != checked:
+                action.setChecked(checked)
+
+    def _on_annotations_changed(self, annotations: AnnotationCollection) -> None:
+        """Enable Clear Annotations only while annotations exist."""
+        has_any = annotations.has_any()
+        self._catalog.action(ActionId.CLEAR_ANNOTATIONS).setEnabled(has_any)
+
+    def _clear_annotations(self) -> None:
+        """Remove every annotation and report it in the status bar."""
+        self._viewer_panel.clear_annotations()
+        self._status_bar.showMessage("Cleared all annotations.")
+
+    def _on_playback_changed(self, playing: bool) -> None:
+        """Mirror cine playback state onto the Play Series action."""
+        action = self._catalog.action(ActionId.PLAY_CINE)
+        if action.isChecked() != playing:
+            action.setChecked(playing)
+
+    def _toggle_info_overlay(self) -> None:
+        """Show or hide the patient/study information overlay."""
+        enabled = self._catalog.action(ActionId.TOGGLE_INFO_OVERLAY).isChecked()
+        self._viewer_panel.set_show_info_overlay(enabled)
+
+    def _manage_window_presets(self) -> None:
+        """Open the window-preset manager dialog.
+
+        Mutations inside the dialog are published immediately through the
+        apply callback, so nothing is left to do when it closes.
+        """
+        PresetManagerDialog(
+            self,
+            presets=self._settings_manager.current_settings.presets,
+            on_apply=self._apply_custom_presets,
+        ).exec()
+
+    def _apply_custom_presets(self, presets: PresetsSettings) -> None:
+        """Persist a new custom preset list and rebuild the presets menu."""
+        updated = replace(
+            self._settings_manager.current_settings,
+            presets=presets,
+        )
+        try:
+            self._settings_manager.update(updated)
+        except SettingsError as exc:
+            self._error_presenter.show_warning(
+                self,
+                "Presets Not Saved",
+                "The preset changes apply for this session, but they could not be saved.",
+                detail=str(exc),
+            )
+        self._refresh_preset_menu()
+
+    def _combined_presets(self) -> tuple[WindowPreset, ...]:
+        """Return built-in presets followed by the user's custom ones."""
+        return (*WINDOW_PRESETS, *self._settings_manager.current_settings.presets.custom)
+
+    def _refresh_preset_menu(self) -> None:
+        """Rebuild the Window Presets submenu from the current settings."""
+        if self._presets_menu is None:
+            return
+        self._preset_actions = refresh_window_presets_menu(
+            self._presets_menu,
+            self._combined_presets(),
+            self._apply_window_preset,
+        )
+        has_image = self._viewer_panel.has_image
+        for action in self._preset_actions:
+            action.setEnabled(has_image)
 
     def _clear_measurements(self) -> None:
         """Remove every measurement and report it in the status bar."""
@@ -704,6 +882,7 @@ class MainWindow(QMainWindow):
         self._catalog.refresh_icons()
         self._status_bar.set_theme(THEMES[settings.appearance.theme].display_name)
         self._apply_viewing_preferences()
+        self._refresh_preset_menu()
         self._refresh_recent_menu()
         return settings
 
@@ -714,6 +893,11 @@ class MainWindow(QMainWindow):
         self._viewer_panel.set_smooth_scaling(settings.viewing.smooth_scaling)
         self._viewer_panel.set_show_statistics_overlay(settings.viewing.show_statistics_overlay)
         self._viewer_panel.set_show_measurement_overlay(settings.viewing.show_measurement_overlay)
+        self._viewer_panel.set_show_info_overlay(settings.viewing.show_info_overlay)
+        self._catalog.action(ActionId.TOGGLE_INFO_OVERLAY).setChecked(
+            settings.viewing.show_info_overlay
+        )
+        self._viewer_panel.set_cine_fps(settings.viewing.cine_fps)
         self._viewer_panel.set_measurement_color(settings.measurements.color)
 
     def _apply_default_window_preset(self) -> None:
@@ -722,6 +906,8 @@ class MainWindow(QMainWindow):
         if not preset_name or not self._viewer_panel.has_image:
             return
         preset = find_window_preset(preset_name)
+        if preset is None:
+            preset = self._settings_manager.current_settings.presets.find(preset_name)
         if preset is not None:
             self._viewer_panel.apply_preset(preset)
 

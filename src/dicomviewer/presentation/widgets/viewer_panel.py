@@ -7,18 +7,43 @@ from collections.abc import Sequence
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QStackedWidget, QVBoxLayout, QWidget
 
+from dicomviewer.application.annotation import AnnotationCollection
 from dicomviewer.application.measurement import MeasurementCollection
 from dicomviewer.application.processing import Histogram, ImageAnalyzer, PixelStatistics
 from dicomviewer.application.viewing import PixelDecoder, RenderedImage, ViewRenderer
+from dicomviewer.domain.annotation import AnnotationKind
 from dicomviewer.domain.image_processing import WindowPreset
 from dicomviewer.domain.measurement import Measurement, MeasurementKind
 from dicomviewer.domain.studies import Image
+from dicomviewer.presentation.playback.cine_controller import CineController
 from dicomviewer.presentation.theme.icon_provider import IconProvider
 from dicomviewer.presentation.widgets.empty_state import EmptyState
 from dicomviewer.presentation.widgets.image_viewer import ImageViewerWidget
+from dicomviewer.presentation.widgets.slice_navigation_bar import SliceNavigationBar
+from dicomviewer.presentation.widgets.viewer_overlays import SeriesOverlayInfo
 
 _PAGE_EMPTY = 0
 _PAGE_VIEWER = 1
+
+
+class _SliceDriver:
+    """Adapt :class:`ImageViewerWidget` to the cine controller's panel protocol."""
+
+    def __init__(self, viewer: ImageViewerWidget) -> None:
+        """Wrap ``viewer`` for slice queries and jumps."""
+        self._viewer = viewer
+
+    def current_slice(self) -> int:
+        """Return the viewer's current slice index."""
+        return self._viewer.current_slice
+
+    def slice_count(self) -> int:
+        """Return how many slices the viewer can navigate."""
+        return self._viewer.slice_count
+
+    def set_slice(self, index: int) -> None:
+        """Show the slice at ``index``."""
+        self._viewer.set_slice(index)
 
 
 class ViewerPanel(QWidget):
@@ -30,6 +55,9 @@ class ViewerPanel(QWidget):
     window_level_changed = Signal(object, float)
     measurements_changed = Signal(object)
     measure_mode_changed = Signal(object)
+    annotations_changed = Signal(object)
+    annotation_mode_changed = Signal(object)
+    playback_changed = Signal(bool)
     open_folder_requested = Signal()
     escape_pressed = Signal()
 
@@ -46,13 +74,23 @@ class ViewerPanel(QWidget):
         super().__init__(parent)
         self.setObjectName("viewerPanel")
         self._viewer = ImageViewerWidget(self, decoder, renderer, analyzer=analyzer)
-        self._viewer.content_changed.connect(self.content_changed)
-        self._viewer.slice_changed.connect(self.slice_changed)
+        self._viewer.content_changed.connect(self._on_viewer_content_changed)
         self._viewer.zoom_changed.connect(self.zoom_changed)
         self._viewer.window_level_changed.connect(self.window_level_changed)
         self._viewer.measurements_changed.connect(self.measurements_changed)
         self._viewer.measure_mode_changed.connect(self.measure_mode_changed)
+        self._viewer.annotations_changed.connect(self.annotations_changed)
+        self._viewer.annotation_mode_changed.connect(self.annotation_mode_changed)
         self._viewer.escape_pressed.connect(self.escape_pressed)
+
+        self._cine_fps = 15
+        self._cine = CineController(
+            _SliceDriver(self._viewer),
+            fps_provider=lambda: self._cine_fps,
+            parent=self,
+        )
+        self._cine.playing_changed.connect(self.playback_changed)
+        self._cine.playing_changed.connect(self._set_nav_playing)
 
         self._stack = QStackedWidget(self)
         self._stack.addWidget(
@@ -71,12 +109,21 @@ class ViewerPanel(QWidget):
         self._stack.addWidget(self._viewer)
         self._stack.setCurrentIndex(_PAGE_EMPTY)
 
+        self._nav_bar = SliceNavigationBar(icon_provider, self)
+        self._nav_bar.setVisible(False)
+        self._nav_bar.slice_selected.connect(self.set_slice)
+        self._nav_bar.play_toggled.connect(self.toggle_playback)
+        self._viewer.slice_changed.connect(self._on_viewer_slice_changed)
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(self._stack)
+        layout.setSpacing(0)
+        layout.addWidget(self._stack, 1)
+        layout.addWidget(self._nav_bar)
 
     def load_series(self, images: Sequence[Image], index: int = 0) -> None:
         """Load ``images`` into the viewer and switch to it."""
+        self.pause_playback()
         self._viewer.load_series(images, index)
         self._stack.setCurrentIndex(_PAGE_VIEWER)
 
@@ -84,6 +131,27 @@ class ViewerPanel(QWidget):
         """Return to the empty state and unload any series."""
         self._viewer.clear()
         self._stack.setCurrentIndex(_PAGE_EMPTY)
+
+    def _on_viewer_content_changed(self, has_image: bool) -> None:
+        """Sync the navigation bar with the loaded series size."""
+        if has_image:
+            count = max(self._viewer.slice_count, 0)
+            self._nav_bar.set_range(count)
+            self._nav_bar.setVisible(count > 1)
+        else:
+            self._cine.pause()
+            self._nav_bar.set_range(0)
+            self._nav_bar.setVisible(False)
+        self.content_changed.emit(has_image)
+
+    def _on_viewer_slice_changed(self, index: int, count: int) -> None:
+        """Mirror slice changes into the navigation bar and re-emit."""
+        self._nav_bar.set_index(index)
+        self.slice_changed.emit(index, count)
+
+    def _set_nav_playing(self, playing: bool) -> None:
+        """Reflect playback state on the navigation bar's play button."""
+        self._nav_bar.set_playing(playing)
 
     @property
     def has_image(self) -> bool:
@@ -195,6 +263,70 @@ class ViewerPanel(QWidget):
     def set_measurement_color(self, color: str) -> None:
         """Set the colour used for measurement overlays."""
         self._viewer.set_measurement_color(color)
+
+    def rotate_cw(self) -> None:
+        """Rotate the displayed image 90 degrees clockwise."""
+        self._viewer.rotate_cw()
+
+    def rotate_ccw(self) -> None:
+        """Rotate the displayed image 90 degrees counter-clockwise."""
+        self._viewer.rotate_ccw()
+
+    def flip_horizontally(self) -> None:
+        """Mirror the displayed image horizontally."""
+        self._viewer.flip_horizontally()
+
+    def flip_vertically(self) -> None:
+        """Mirror the displayed image vertically."""
+        self._viewer.flip_vertically()
+
+    def toggle_invert(self) -> None:
+        """Invert the grayscale display of the current image."""
+        self._viewer.toggle_invert()
+
+    @property
+    def annotations(self) -> AnnotationCollection:
+        """Return the viewer's annotation collection."""
+        return self._viewer.annotations
+
+    @property
+    def annotation_mode(self) -> AnnotationKind | None:
+        """Return the active annotation tool, or ``None``."""
+        return self._viewer.annotation_mode
+
+    def set_annotation_mode(self, kind: AnnotationKind | None) -> None:
+        """Activate or deactivate an annotation tool."""
+        self._viewer.set_annotation_mode(kind)
+
+    def clear_annotations(self) -> None:
+        """Remove every annotation from every slice."""
+        self._viewer.clear_annotations()
+
+    def set_series_info(self, info: SeriesOverlayInfo | None) -> None:
+        """Set the patient/study details shown in the info overlay."""
+        self._viewer.set_series_info(info)
+
+    def set_show_info_overlay(self, enabled: bool) -> None:
+        """Show or hide the patient/study information overlay."""
+        self._viewer.set_show_info_overlay(enabled)
+
+    def toggle_playback(self) -> None:
+        """Start or pause cine playback of the loaded series."""
+        self._cine.toggle()
+
+    def pause_playback(self) -> None:
+        """Stop cine playback if it is running."""
+        self._cine.pause()
+
+    @property
+    def is_playing(self) -> bool:
+        """Return whether cine playback is currently active."""
+        return self._cine.is_playing
+
+    def set_cine_fps(self, fps: int) -> None:
+        """Change the cine playback rate."""
+        self._cine_fps = fps
+        self._cine.refresh_rate()
 
     def capture_view(self) -> RenderedImage:
         """Return the current viewport (frame plus overlays) as RGBA bytes."""

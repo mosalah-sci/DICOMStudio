@@ -5,6 +5,41 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/), and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.3.0] - 2026-08-23
+
+### Added
+
+- **Viewport orientation** — rotate 90° clockwise (Ctrl+R) or counter-clockwise
+  (Ctrl+Shift+R), flip horizontal (Ctrl+H) or vertical (Ctrl+Shift+H), and
+  invert grayscale (Ctrl+U). Orientation transforms every overlay coordinate,
+  mouse interaction and the exported/copied image, and Reset View clears it.
+- **Basic annotations** — three new Tools: point markers, arrows and text
+  notes. Click to place (text prompts for its label), right-click an annotation
+  to delete it, click to select, and Delete/Backspace removes the selection.
+  Annotations live per slice in image coordinates and survive orientation.
+- **Custom window presets** — create, edit and delete your own window presets
+  via Tools → Window Presets → Manage Presets… Custom presets persist in the
+  settings file, appear alongside the built-ins in the presets submenu and can
+  be used as the default window preset.
+- **Slice navigation bar** — a slider with previous/next buttons and a
+  unified editable `[ current ] / total` slice control appears under the
+  viewer for multi-slice series; typing a number jumps straight to that slice.
+- **Cine playback** — Play Series (Space, toolbar or navigation-bar button)
+  steps through a multi-slice series at the configured rate; play/pause is
+  mirrored between the toolbar action and the navigation bar.
+- **Patient/study info overlay** — patient demographics and study/series
+  details are drawn on the image; toggle via View → Patient/Study Info or the
+  new "Show patient/study info" setting.
+- **Cine playback speed setting** — "Cine playback (fps)" (1–60 fps) in the
+  Viewing section of Settings.
+
+### Changed
+
+- The toolbar gained invert, annotate and play/pause buttons next to Measure.
+- Right-clicking during an active measurement draft cancels it; otherwise it
+  deletes a measurement under the cursor.
+- Reset View also restores rotation/flips (window/level behaviour unchanged).
+
 ## [1.2.0] - 2026-08-17
 
 ### Added

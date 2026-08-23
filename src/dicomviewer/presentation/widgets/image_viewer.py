@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import replace
+from math import atan2, cos, sin
 
 from loguru import logger
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
@@ -22,10 +23,12 @@ from PySide6.QtGui import (
     QPainter,
     QPaintEvent,
     QPen,
+    QPolygonF,
     QWheelEvent,
 )
 from PySide6.QtWidgets import QWidget
 
+from dicomviewer.application.annotation import AnnotationCollection
 from dicomviewer.application.measurement import MeasurementCollection, measurement_label
 from dicomviewer.application.processing import Histogram, ImageAnalyzer, PixelStatistics
 from dicomviewer.application.viewing import (
@@ -36,15 +39,38 @@ from dicomviewer.application.viewing import (
     UnsupportedPixelFormatError,
     ViewRenderer,
 )
+from dicomviewer.domain.annotation import Annotation, AnnotationKind
 from dicomviewer.domain.image_processing import WindowPreset
-from dicomviewer.domain.measurement import Measurement, MeasurementKind, Point
+from dicomviewer.domain.measurement import (
+    DEFAULT_HIT_TOLERANCE,
+    Measurement,
+    MeasurementKind,
+    Point,
+)
 from dicomviewer.domain.studies import Image
-from dicomviewer.domain.viewport import FitMode, Viewport, clamp_slice
+from dicomviewer.domain.viewport import (
+    FitMode,
+    Viewport,
+    clamp_slice,
+    orient_point,
+    oriented_size,
+    unorient_point,
+)
 from dicomviewer.presentation.imaging.rendered_image import (
     rendered_image_from_qimage,
     to_qimage,
 )
+from dicomviewer.presentation.widgets.annotation_tool import AnnotationTool
 from dicomviewer.presentation.widgets.measurement_tool import MeasurementTool
+from dicomviewer.presentation.widgets.viewer_overlays import (
+    SeriesOverlayInfo,
+    draw_label_box,
+    draw_overlay_text,
+    orientation_badges,
+    paint_histogram_bars,
+    paint_series_info,
+    technical_line,
+)
 
 _DRAG_NONE = 0
 _DRAG_PAN = 1
@@ -60,8 +86,9 @@ _DEFAULT_CACHE_SIZE = 3
 # keeps the render cache from competing with the user-configured decode cache.
 _RENDER_CACHE_SIZE = 2
 _HISTOGRAM_BINS = 128
-_HISTOGRAM_WIDTH = 120
-_HISTOGRAM_HEIGHT = 36
+_ANNOTATION_COLOR = "#a78bfa"
+_HIT_TOLERANCE_WIDGET = 8.0
+_ARROWHEAD_WIDGET_LENGTH = 10.0
 
 
 class ImageViewerWidget(QWidget):
@@ -73,6 +100,8 @@ class ImageViewerWidget(QWidget):
     window_level_changed = Signal(object, float)  # center (None = auto), width
     measurements_changed = Signal(object)  # MeasurementCollection
     measure_mode_changed = Signal(object)  # MeasurementKind | None
+    annotations_changed = Signal(object)  # AnnotationCollection
+    annotation_mode_changed = Signal(object)  # AnnotationKind | None
     escape_pressed = Signal()  # Esc with no active tool, e.g. to leave fullscreen
 
     def __init__(
@@ -86,6 +115,7 @@ class ImageViewerWidget(QWidget):
         smooth_scaling: bool = True,
         show_statistics_overlay: bool = True,
         show_measurement_overlay: bool = True,
+        show_info_overlay: bool = True,
         measurement_color: str = "#22d3ee",
     ) -> None:
         """Create a viewer backed by ``decoder``, ``renderer`` and ``analyzer``."""
@@ -97,11 +127,12 @@ class ImageViewerWidget(QWidget):
         self._smooth_scaling = smooth_scaling
         self._show_statistics_overlay = show_statistics_overlay
         self._show_measurement_overlay = show_measurement_overlay
+        self._show_info_overlay = show_info_overlay
         self._measurement_color = measurement_color
         self._images: tuple[Image, ...] = ()
         self._cache: dict[int, PixelArray] = {}
         self._slice_analysis: dict[int, tuple[PixelStatistics, Histogram]] = {}
-        self._frame_cache: dict[tuple[int, float | None, float], RenderedImage] = {}
+        self._frame_cache: dict[tuple[int, float | None, float, bool], RenderedImage] = {}
         self._viewport = Viewport.initial()
         self._rendered: RenderedImage | None = None
         self._qimage: QImage | None = None
@@ -113,6 +144,11 @@ class ImageViewerWidget(QWidget):
         self._measurements = MeasurementCollection()
         self._measure_tool = MeasurementTool(self)
         self._measure_tool.commit_requested.connect(self._on_measurement_committed)
+        self._annotations = AnnotationCollection()
+        self._annotation_tool = AnnotationTool(self)
+        self._annotation_tool.commit_requested.connect(self._on_annotation_committed)
+        self._annotation_tool.removal_requested.connect(self.remove_annotation)
+        self._series_info: SeriesOverlayInfo | None = None
 
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setMouseTracking(True)
@@ -146,6 +182,8 @@ class ImageViewerWidget(QWidget):
         self._last_error = None
         self._measurements = MeasurementCollection()
         self._measure_tool.reset()
+        self._annotations = AnnotationCollection()
+        self._annotation_tool.reset()
         self._viewport = Viewport(
             slice_index=clamp_slice(index, len(self._images)),
             fit_mode=FitMode.FIT,
@@ -153,6 +191,7 @@ class ImageViewerWidget(QWidget):
         self._render_current()
         self.update()
         self.measurements_changed.emit(self._measurements)
+        self.annotations_changed.emit(self._annotations)
         if self.has_image:
             self.content_changed.emit(True)
             self.slice_changed.emit(self._viewport.slice_index, len(self._images))
@@ -170,10 +209,14 @@ class ImageViewerWidget(QWidget):
         self._last_error = None
         self._measurements = MeasurementCollection()
         self._measure_tool.deactivate()
+        self._annotations = AnnotationCollection()
+        self._annotation_tool.deactivate()
         self._viewport = Viewport.initial()
         self.update()
         self.measurements_changed.emit(self._measurements)
         self.measure_mode_changed.emit(None)
+        self.annotations_changed.emit(self._annotations)
+        self.annotation_mode_changed.emit(None)
         self.content_changed.emit(False)
 
     def set_slice(self, index: int) -> None:
@@ -220,7 +263,7 @@ class ImageViewerWidget(QWidget):
         self.update()
 
     def reset_view(self) -> None:
-        """Reset zoom, pan and window/level, keeping the current slice."""
+        """Reset zoom, pan, orientation and window/level, keeping the slice."""
         self._viewport = Viewport(
             slice_index=self._viewport.slice_index,
             fit_mode=FitMode.FIT,
@@ -248,6 +291,32 @@ class ImageViewerWidget(QWidget):
         """Apply a named clinical window preset."""
         self.set_window(preset.center, preset.width)
 
+    def rotate_cw(self) -> None:
+        """Rotate the displayed frame 90 degrees clockwise."""
+        self._viewport = self._viewport.rotate_cw()
+        self.update()
+
+    def rotate_ccw(self) -> None:
+        """Rotate the displayed frame 90 degrees counter-clockwise."""
+        self._viewport = self._viewport.rotate_ccw()
+        self.update()
+
+    def flip_horizontally(self) -> None:
+        """Mirror the displayed frame horizontally."""
+        self._viewport = self._viewport.toggle_flip_h()
+        self.update()
+
+    def flip_vertically(self) -> None:
+        """Mirror the displayed frame vertically."""
+        self._viewport = self._viewport.toggle_flip_v()
+        self.update()
+
+    def toggle_invert(self) -> None:
+        """Toggle grayscale inversion and re-render the frame."""
+        self._viewport = self._viewport.toggle_invert()
+        self._render_current()
+        self.update()
+
     @property
     def measurements(self) -> MeasurementCollection:
         """Return the per-slice measurement collection."""
@@ -260,6 +329,9 @@ class ImageViewerWidget(QWidget):
 
     def set_measure_mode(self, kind: MeasurementKind | None) -> None:
         """Activate or deactivate the measurement tool."""
+        if kind is not None:
+            self._annotation_tool.deactivate()
+            self.annotation_mode_changed.emit(None)
         if kind is None:
             self._measure_tool.deactivate()
             self.setCursor(Qt.CursorShape.ArrowCursor)
@@ -281,6 +353,68 @@ class ImageViewerWidget(QWidget):
         self._measure_tool.reset()
         self.measurements_changed.emit(self._measurements)
         self.update()
+
+    @property
+    def annotations(self) -> AnnotationCollection:
+        """Return the per-slice annotation collection."""
+        return self._annotations
+
+    @property
+    def annotation_mode(self) -> AnnotationKind | None:
+        """Return the active annotation kind, or ``None`` when inactive."""
+        return self._annotation_tool.kind
+
+    def set_annotation_mode(self, kind: AnnotationKind | None) -> None:
+        """Activate or deactivate the annotation tool.
+
+        Activating an annotation kind leaves the measurement tool, which are
+        mutually exclusive.
+        """
+        if kind is not None:
+            self._measure_tool.deactivate()
+            self.measure_mode_changed.emit(None)
+        if kind is None:
+            self._annotation_tool.deactivate()
+            self.setCursor(Qt.CursorShape.ArrowCursor)
+        else:
+            self._annotation_tool.activate(kind)
+            self.setCursor(Qt.CursorShape.CrossCursor)
+        self.annotation_mode_changed.emit(kind)
+        self.update()
+
+    def remove_annotation(self, annotation: Annotation) -> None:
+        """Remove one annotation from the current slice."""
+        if self._annotations.remove(self.current_slice, annotation):
+            self.annotations_changed.emit(self._annotations)
+            self.update()
+
+    def clear_annotations(self) -> None:
+        """Remove every annotation from every slice."""
+        self._annotations.clear_all()
+        self._annotation_tool.reset()
+        self.annotations_changed.emit(self._annotations)
+        self.update()
+
+    def set_series_info(self, info: SeriesOverlayInfo | None) -> None:
+        """Set the metadata block shown by the info overlay."""
+        self._series_info = info
+        self.update()
+
+    def set_show_info_overlay(self, enabled: bool) -> None:
+        """Show or hide the patient/study information overlay."""
+        self._show_info_overlay = enabled
+        self.update()
+
+    def hit_tolerance_pixels(self) -> float:
+        """Return the hit-test tolerance in image pixels for the pointer.
+
+        The constant widget-space slop is converted with the current display
+        scale and clamped so it stays usable at extreme zoom levels.
+        """
+        scale = self._effective_scale()
+        if scale <= 0.0:
+            return DEFAULT_HIT_TOLERANCE
+        return min(max(_HIT_TOLERANCE_WIDGET / scale, 1.0), 64.0)
 
     def set_max_cache(self, size: int) -> None:
         """Set the decode cache size and evict entries beyond it."""
@@ -308,20 +442,36 @@ class ImageViewerWidget(QWidget):
         self.update()
 
     def widget_to_image(self, position: QPointF) -> Point:
-        """Map a widget coordinate into image pixel coordinates."""
+        """Map a widget coordinate into image pixel coordinates.
+
+        The widget position is first expressed in display space, then run
+        through the inverse of the orientation transform applied at paint
+        time so annotations land on the same anatomy regardless of rotation
+        or flips.
+        """
         image = self._qimage
         if image is None or image.isNull():
             return Point(position.x(), position.y())
         rect = self._target_rect(image)
         if rect.width() <= 0 or rect.height() <= 0:
             return Point(0.0, 0.0)
-        point = Point(
-            (position.x() - rect.left()) / rect.width() * image.width(),
-            (position.y() - rect.top()) / rect.height() * image.height(),
+        display_width, display_height = oriented_size(
+            image.width(), image.height(), self._viewport.rotation
+        )
+        display_x = (position.x() - rect.left()) / rect.width() * display_width
+        display_y = (position.y() - rect.top()) / rect.height() * display_height
+        point = unorient_point(
+            display_x,
+            display_y,
+            image.width(),
+            image.height(),
+            self._viewport.rotation,
+            self._viewport.flip_h,
+            self._viewport.flip_v,
         )
         return Point(
-            min(max(point.x, 0.0), float(image.width() - 1)),
-            min(max(point.y, 0.0), float(image.height() - 1)),
+            min(max(point[0], 0.0), float(image.width() - 1)),
+            min(max(point[1], 0.0), float(image.height() - 1)),
         )
 
     def image_to_widget(self, point: Point) -> QPointF:
@@ -330,9 +480,23 @@ class ImageViewerWidget(QWidget):
         if image is None or image.isNull():
             return QPointF(point.x, point.y)
         rect = self._target_rect(image)
+        if rect.width() <= 0 or rect.height() <= 0:
+            return QPointF(rect.left(), rect.top())
+        display_width, display_height = oriented_size(
+            image.width(), image.height(), self._viewport.rotation
+        )
+        display_x, display_y = orient_point(
+            point.x,
+            point.y,
+            image.width(),
+            image.height(),
+            self._viewport.rotation,
+            self._viewport.flip_h,
+            self._viewport.flip_v,
+        )
         return QPointF(
-            rect.left() + point.x / image.width() * rect.width(),
-            rect.top() + point.y / image.height() * rect.height(),
+            rect.left() + display_x / display_width * rect.width(),
+            rect.top() + display_y / display_height * rect.height(),
         )
 
     def capture_view(self) -> RenderedImage:
@@ -365,14 +529,21 @@ class ImageViewerWidget(QWidget):
         return analysis[1] if analysis is not None else None
 
     def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802
-        """Begin a pan/window drag or place a measurement point."""
+        """Begin a pan/window drag or place a measurement/annotation point."""
         self.setFocus()
+        if self._annotation_tool.is_active():
+            if event.button() == Qt.MouseButton.LeftButton:
+                self._annotation_tool.handle_press(event.position())
+            elif event.button() == Qt.MouseButton.RightButton:
+                self._annotation_tool.handle_right_press(event.position())
+            self.update()
+            return
         if self._measure_tool.is_active():
             if event.button() == Qt.MouseButton.LeftButton:
                 self._measure_tool.handle_press(event.position())
                 self.update()
             elif event.button() == Qt.MouseButton.RightButton:
-                self._measure_tool.cancel_draft()
+                self._on_measure_right_press(event.position())
                 self.update()
             return
         if event.button() == Qt.MouseButton.LeftButton and self.has_image:
@@ -382,8 +553,25 @@ class ImageViewerWidget(QWidget):
         else:
             super().mousePressEvent(event)
 
+    def _on_measure_right_press(self, position: QPointF) -> None:
+        """Cancel a measurement draft or remove the hit measurement."""
+        if self._measure_tool.draft_points():
+            self._measure_tool.cancel_draft()
+            return
+        hit = self._measurements.measurement_at(
+            self.current_slice,
+            self.widget_to_image(position),
+            tolerance=self.hit_tolerance_pixels(),
+        )
+        if hit is not None:
+            self.remove_measurement(hit)
+
     def mouseMoveEvent(self, event: QMouseEvent) -> None:  # noqa: N802
         """Update the active drag or rubber-band a measurement draft."""
+        if self._annotation_tool.is_active():
+            self._annotation_tool.handle_move(event.position())
+            self.update()
+            return
         if self._measure_tool.is_active():
             self._measure_tool.handle_move(event.position())
             self.update()
@@ -413,7 +601,7 @@ class ImageViewerWidget(QWidget):
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:  # noqa: N802
         """End the active drag."""
         del event
-        if not self._measure_tool.is_active():
+        if not self._measure_tool.is_active() and not self._annotation_tool.is_active():
             self._end_drag()
 
     def wheelEvent(self, event: QWheelEvent) -> None:  # noqa: N802
@@ -471,16 +659,27 @@ class ImageViewerWidget(QWidget):
             )
             event.accept()
         elif key == Qt.Key.Key_Escape:
-            if self._measure_tool.is_active():
+            if self._annotation_tool.is_active():
+                if self._annotation_tool.has_draft():
+                    self._annotation_tool.reset()
+                elif self._annotation_tool.selected() is not None:
+                    self._annotation_tool.set_selected(None)
+                else:
+                    self.set_annotation_mode(None)
+            elif self._measure_tool.is_active():
                 self.set_measure_mode(None)
             else:
                 self.escape_pressed.emit()
+            event.accept()
+        elif key in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace):
+            if self._annotation_tool.is_active() and self._annotation_tool.delete_selected():
+                self.update()
             event.accept()
         else:
             super().keyPressEvent(event)
 
     def paintEvent(self, event: QPaintEvent) -> None:  # noqa: N802
-        """Paint the rendered frame with the current zoom and pan transform."""
+        """Paint the rendered frame with the current viewport transform."""
         del event
         painter = QPainter(self)
         painter.fillRect(self.rect(), self.palette().window().color())
@@ -488,7 +687,20 @@ class ImageViewerWidget(QWidget):
         if image is not None and not image.isNull():
             if self._smooth_scaling:
                 painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
-            painter.drawImage(self._target_rect(image), image)
+            rect = self._target_rect(image)
+            painter.save()
+            painter.translate(rect.center())
+            if self._viewport.rotation:
+                # Qt angles are clockwise on screen because the y axis points
+                # down, matching the domain's clockwise rotation convention.
+                painter.rotate(float(self._viewport.rotation))
+            painter.scale(
+                -1.0 if self._viewport.flip_h else 1.0,
+                -1.0 if self._viewport.flip_v else 1.0,
+            )
+            painter.translate(-rect.center())
+            painter.drawImage(rect, image)
+            painter.restore()
         if self._last_error:
             self._paint_message(painter, self._last_error)
         elif image is None:
@@ -603,6 +815,7 @@ class ImageViewerWidget(QWidget):
             self._viewport.slice_index,
             self._viewport.window_center,
             self._viewport.window_width,
+            self._viewport.invert,
         )
         rendered = self._frame_cache.get(cache_key)
         if rendered is None:
@@ -628,16 +841,23 @@ class ImageViewerWidget(QWidget):
         logger.warning("Image display issue: {}", exc)
         self._last_error = message
 
+    def _display_size(self, image: QImage) -> tuple[int, int]:
+        """Return the on-screen size of ``image`` after orientation."""
+        return oriented_size(image.width(), image.height(), self._viewport.rotation)
+
     def _effective_scale(self) -> float:
-        """Return the scale factor that maps image pixels to widget pixels."""
+        """Return the scale factor that maps display pixels to widget pixels."""
         image = self._qimage
         if image is None or image.isNull():
             return 1.0
+        display_width, display_height = self._display_size(image)
+        if display_width <= 0 or display_height <= 0:
+            return 1.0
         if self._viewport.fit_mode == FitMode.FIT:
-            width, height = self.width(), self.height()
-            if image.width() <= 0 or image.height() <= 0:
-                return 1.0
-            return min(width / image.width(), height / image.height())
+            return min(
+                self.width() / display_width,
+                self.height() / display_height,
+            )
         if self._viewport.fit_mode == FitMode.ACTUAL:
             return 1.0
         return self._viewport.zoom
@@ -653,10 +873,13 @@ class ImageViewerWidget(QWidget):
         return self._viewport.zoom
 
     def _target_rect(self, image: QImage) -> QRectF:
-        """Return the destination rectangle for the rendered frame."""
+        """Return the destination rectangle for the rendered frame.
+
+        The rectangle covers the oriented display size; the paint transform
+        rotates/flips the frame inside it.
+        """
         scale = self._effective_scale()
-        target_width = image.width() * scale
-        target_height = image.height() * scale
+        target_width, target_height = (dimension * scale for dimension in self._display_size(image))
         center_x = self.width() / 2.0 + self._viewport.pan_x * scale
         center_y = self.height() / 2.0 + self._viewport.pan_y * scale
         return QRectF(
@@ -667,35 +890,65 @@ class ImageViewerWidget(QWidget):
         )
 
     def _paint_overlay(self, painter: QPainter) -> None:
-        """Draw window, slice, zoom and statistics information in the corner."""
+        """Draw info blocks, status line, badges, tools and overlays."""
         painter.save()
-        painter.setPen(Qt.GlobalColor.gray)
-        info: list[str] = []
-        if self._viewport.window_width > 0 and self._viewport.window_center is not None:
-            info.append(
-                f"W: {self._viewport.window_width:.0f} L: {self._viewport.window_center:.0f}"
-            )
-        else:
-            info.append("W/L: Auto")
-        if self.has_image:
-            info.append(f"{self._viewport.slice_index + 1} / {len(self._images)}")
-        info.append(f"{self._effective_scale() * 100.0:.0f}%")
-        painter.drawText(QPointF(12.0, self.height() - 12.0), "   ".join(info))
-
+        if self._show_info_overlay and self._series_info is not None:
+            paint_series_info(painter, QRectF(0, 0, self.width(), self.height()), self._series_info)
+        line = technical_line(
+            self._viewport,
+            len(self._images),
+            self._effective_scale() * 100.0,
+        )
+        draw_overlay_text(painter, QPointF(12.0, self.height() - 12.0), line)
         stats = self.statistics
         if self._show_statistics_overlay and stats is not None:
             text = (
                 f"min {stats.minimum:.0f}  max {stats.maximum:.0f}  "
                 f"mean {stats.mean:.1f}  SD {stats.standard_deviation:.1f}"
             )
-            painter.drawText(QPointF(12.0, self.height() - 30.0), text)
+            draw_overlay_text(painter, QPointF(12.0, self.height() - 30.0), text)
             self._paint_histogram(painter, QPointF(12.0, self.height() - 56.0))
-
-        if self._measure_tool.is_active():
-            painter.setPen(Qt.GlobalColor.yellow)
-            painter.drawText(QPointF(12.0, 24.0), "Measuring - click to place points (Esc to stop)")
+        annotation_kind = self._annotation_tool.kind
+        if self._annotation_tool.is_active() and annotation_kind is not None:
+            hint = f"Annotating ({annotation_kind.value}) - click to place (Esc to stop)"
+            draw_label_box(painter, hint, QPointF(self.width() / 2.0, 20.0))
+        elif self._measure_tool.is_active():
+            draw_label_box(
+                painter,
+                "Measuring - click to place points (Esc to stop)",
+                QPointF(self.width() / 2.0, 20.0),
+            )
+        painter.restore()
+        self._paint_orientation_badges(painter)
         if self._show_measurement_overlay:
             self._paint_measurements(painter)
+        self._paint_annotations(painter)
+
+    def _paint_orientation_badges(self, painter: QPainter) -> None:
+        """Draw orientation badges right of the technical status line."""
+        badges = orientation_badges(self._viewport)
+        if not badges:
+            return
+        painter.save()
+        font = painter.font()
+        font.setBold(True)
+        painter.setFont(font)
+        metrics = QFontMetricsF(font)
+        x = (
+            12.0
+            + metrics.horizontalAdvance(
+                technical_line(
+                    self._viewport,
+                    len(self._images),
+                    self._effective_scale() * 100.0,
+                )
+            )
+            + 10.0
+        )
+        y = self.height() - 12.0 - metrics.height() / 2.0 + 3.0
+        for badge in badges:
+            draw_label_box(painter, badge, QPointF(x + metrics.horizontalAdvance(badge) / 2.0, y))
+            x += metrics.horizontalAdvance(badge) + 12.0
         painter.restore()
 
     def _paint_measurements(self, painter: QPainter) -> None:
@@ -704,7 +957,23 @@ class ImageViewerWidget(QWidget):
         pixel_spacing = self._measurements.pixel_spacing
         for measurement in measurements:
             self._draw_measurement(painter, measurement, pixel_spacing)
-        if self._measure_tool.is_active():
+        if self._show_measurement_overlay and self._measure_tool.is_active():
+            draft = self._measure_tool.draft_points()
+            preview = self._measure_tool.preview_point()
+            if (
+                self._measure_tool.kind is MeasurementKind.DISTANCE
+                and len(draft) == 1
+                and preview is not None
+            ):
+                provisional = Measurement(MeasurementKind.DISTANCE, (draft[0], preview))
+                label = measurement_label(provisional, pixel_spacing)
+                start = self.image_to_widget(draft[0])
+                end = self.image_to_widget(preview)
+                midpoint = QPointF(
+                    (start.x() + end.x()) / 2.0,
+                    (start.y() + end.y()) / 2.0,
+                )
+                draw_label_box(painter, label, midpoint)
             self._measure_tool.paint(painter)
 
     def _draw_measurement(
@@ -716,15 +985,19 @@ class ImageViewerWidget(QWidget):
         """Draw one completed measurement with its handle points and label."""
         points = [self.image_to_widget(point) for point in measurement.points]
         painter.save()
-        painter.setPen(QPen(QColor(self._measurement_color), 1.5))
-        painter.setBrush(QColor(self._measurement_color))
+        pen_color = QColor(self._measurement_color)
+        painter.setPen(QPen(pen_color, 1.5))
+        painter.setBrush(pen_color)
         for point in points:
             painter.drawEllipse(point, 3.0, 3.0)
         label = measurement_label(measurement, pixel_spacing)
         if measurement.kind is MeasurementKind.DISTANCE:
-            painter.setPen(QPen(QColor(self._measurement_color), 1.5))
             painter.drawLine(points[0], points[1])
-            self._draw_label(painter, label, self._midpoint(points[0], points[1]))
+            midpoint = QPointF(
+                (points[0].x() + points[1].x()) / 2.0,
+                (points[0].y() + points[1].y()) / 2.0,
+            )
+            draw_label_box(painter, label, midpoint)
         else:
             painter.drawLine(points[0], points[1])
             painter.drawLine(points[0], points[2])
@@ -732,31 +1005,8 @@ class ImageViewerWidget(QWidget):
                 (points[0].x() + (points[1].x() + points[2].x()) / 2.0) / 2.0,
                 (points[0].y() + (points[1].y() + points[2].y()) / 2.0) / 2.0,
             )
-            self._draw_label(painter, label, label_point)
+            draw_label_box(painter, label, label_point)
         painter.restore()
-
-    def _draw_label(self, painter: QPainter, text: str, position: QPointF) -> None:
-        """Draw ``text`` on a small dark backdrop centered at ``position``."""
-        font = painter.font()
-        font.setBold(True)
-        painter.setFont(font)
-        metrics = QFontMetricsF(font)
-        box = QRectF(
-            position.x() - metrics.horizontalAdvance(text) / 2.0 - 3.0,
-            position.y() - metrics.height() / 2.0 - 2.0,
-            metrics.horizontalAdvance(text) + 6.0,
-            metrics.height() + 4.0,
-        )
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor(0, 0, 0, 150))
-        painter.drawRoundedRect(box, 3.0, 3.0)
-        painter.setPen(QColor("#ffffff"))
-        painter.drawText(box, Qt.AlignmentFlag.AlignCenter, text)
-
-    @staticmethod
-    def _midpoint(a: QPointF, b: QPointF) -> QPointF:
-        """Return the midpoint of two widget points."""
-        return QPointF((a.x() + b.x()) / 2.0, (a.y() + b.y()) / 2.0)
 
     def _on_measurement_committed(self, measurement: Measurement) -> None:
         """Store a completed measurement and notify listeners."""
@@ -764,26 +1014,73 @@ class ImageViewerWidget(QWidget):
         self.measurements_changed.emit(self._measurements)
         self.update()
 
+    def _on_annotation_committed(self, annotation: Annotation) -> None:
+        """Store a completed annotation and notify listeners."""
+        self._annotations.add(self.current_slice, annotation)
+        self.annotations_changed.emit(self._annotations)
+        self.update()
+
+    def _paint_annotations(self, painter: QPainter) -> None:
+        """Draw completed annotations with selection halo and the draft."""
+        annotations = self._annotations.for_slice(self.current_slice)
+        selected = self._annotation_tool.selected()
+        for annotation in annotations:
+            self._draw_annotation(painter, annotation, is_selected=annotation is selected)
+        if self._annotation_tool.is_active():
+            self._annotation_tool.paint(painter)
+
+    def _draw_annotation(
+        self,
+        painter: QPainter,
+        annotation: Annotation,
+        *,
+        is_selected: bool,
+    ) -> None:
+        """Draw one completed annotation in image-anchored widget space."""
+        anchor = self.image_to_widget(annotation.anchor)
+        color = QColor(_ANNOTATION_COLOR)
+        painter.save()
+        painter.setBrush(color)
+        if is_selected:
+            halo = QPen(QColor("#ffffff"), 1.0, Qt.PenStyle.DashLine)
+            painter.setPen(halo)
+            painter.drawEllipse(anchor, 7.0, 7.0)
+        painter.setPen(QPen(color, 1.5))
+        if annotation.kind is AnnotationKind.POINT:
+            painter.drawEllipse(anchor, 3.5, 3.5)
+        elif annotation.tip is not None:
+            tip = self.image_to_widget(annotation.tip)
+            painter.drawLine(anchor, tip)
+            head = QPolygonF(
+                [
+                    tip,
+                    self._arrowhead_corner(anchor, tip, +1.0),
+                    self._arrowhead_corner(anchor, tip, -1.0),
+                ]
+            )
+            painter.drawPolygon(head)
+        else:
+            draw_label_box(painter, annotation.text, anchor)
+        painter.restore()
+
+    def _arrowhead_corner(self, anchor: QPointF, tip: QPointF, side: float) -> QPointF:
+        """Return one arrowhead base corner beside ``tip`` in widget space."""
+        length = _ARROWHEAD_WIDGET_LENGTH
+        dx = tip.x() - anchor.x()
+        dy = tip.y() - anchor.y()
+        angle = atan2(dy, dx)
+        spread = atan2(length, length * 2.0) * side
+        return QPointF(
+            tip.x() - length * cos(angle + spread),
+            tip.y() - length * sin(angle + spread),
+        )
+
     def _paint_histogram(self, painter: QPainter, origin: QPointF) -> None:
         """Draw a small bar histogram for the current slice."""
         histogram = self.histogram
-        if histogram is None or histogram.bin_count <= 0:
+        if histogram is None:
             return
-        maximum = max(histogram.counts) if histogram.counts else 0
-        if maximum <= 0:
-            return
-        bar_width = _HISTOGRAM_WIDTH / histogram.bin_count
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(Qt.GlobalColor.gray)
-        for index, count in enumerate(histogram.counts):
-            height = _HISTOGRAM_HEIGHT * count / maximum
-            bar = QRectF(
-                origin.x() + index * bar_width,
-                origin.y() + (_HISTOGRAM_HEIGHT - height),
-                bar_width + 0.5,
-                height,
-            )
-            painter.drawRect(bar)
+        paint_histogram_bars(painter, origin, histogram.counts)
 
     def _paint_message(self, painter: QPainter, message: str) -> None:
         """Draw a centered diagnostic message."""

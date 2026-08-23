@@ -15,6 +15,8 @@ max_cache_size = 3
 smooth_scaling = true
 show_statistics_overlay = true
 show_measurement_overlay = true
+show_info_overlay = true
+cine_fps = 15
 
 [measurements]
 color = "#22d3ee"
@@ -24,3 +26,6 @@ study_explorer_visible = true
 metadata_visible = true
 study_explorer_width = 260
 metadata_width = 300
+
+[presets]
+custom = []

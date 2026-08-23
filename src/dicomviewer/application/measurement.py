@@ -11,10 +11,13 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from dicomviewer.domain.measurement import (
+    DEFAULT_HIT_TOLERANCE,
     Measurement,
     MeasurementKind,
+    Point,
     angle_degrees,
     distance_pixels,
+    distance_to_measurement,
     distance_with_spacing,
 )
 
@@ -63,6 +66,23 @@ class MeasurementCollection:
     def counts(self) -> dict[int, int]:
         """Return the number of measurements per slice index."""
         return {index: len(entries) for index, entries in self._entries.items()}
+
+    def measurement_at(
+        self,
+        slice_index: int,
+        point: Point,
+        tolerance: float = DEFAULT_HIT_TOLERANCE,
+    ) -> Measurement | None:
+        """Return the topmost measurement within ``tolerance`` of ``point``.
+
+        The search runs backwards so later measurements win over earlier
+        ones, mirroring the paint order.
+        """
+        entries = self._entries.get(slice_index, [])
+        for measurement in reversed(entries):
+            if distance_to_measurement(measurement, point) <= tolerance:
+                return measurement
+        return None
 
 
 def measurement_label(

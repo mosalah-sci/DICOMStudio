@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 
 from PySide6.QtCore import QSize, Qt
@@ -14,6 +15,16 @@ from dicomviewer.presentation.actions.action_catalog import ActionCatalog
 from dicomviewer.presentation.actions.action_ids import ActionId
 from dicomviewer.shared.constants import TOOLBAR_ICON_SIZE
 
+_MANAGE_PRESETS_OBJECT = "manageWindowPresets"
+
+
+@dataclass(frozen=True)
+class MenuHandles:
+    """References to menus whose contents change at runtime."""
+
+    preset_actions: tuple[QAction, ...]
+    presets_menu: QMenu
+
 
 def populate_menu_bar(
     menu_bar: QMenuBar,
@@ -21,11 +32,14 @@ def populate_menu_bar(
     window_presets: Sequence[WindowPreset] = (),
     on_window_preset: Callable[[WindowPreset], None] | None = None,
     on_clear_measurements: Callable[[], None] | None = None,
-) -> tuple[QAction, ...]:
+    on_clear_annotations: Callable[[], None] | None = None,
+    on_manage_presets: Callable[[], None] | None = None,
+) -> MenuHandles:
     """Populate the standard application menus from the catalog.
 
-    Returns the preset actions so callers can enable or disable them based on
-    loaded content.
+    The returned handles give callers access to the window-preset actions so
+    they can be gated on loaded content, and to the presets submenu so it can
+    be rebuilt when custom presets change.
     """
     file_menu = menu_bar.addMenu("&File")
     _add(file_menu, catalog, ActionId.OPEN_FOLDER)
@@ -43,15 +57,35 @@ def populate_menu_bar(
     _add(view_menu, catalog, ActionId.ZOOM_IN)
     _add(view_menu, catalog, ActionId.ZOOM_OUT)
     _add(view_menu, catalog, ActionId.RESET_VIEW)
+    view_menu.addSeparator()
+    _add(view_menu, catalog, ActionId.ROTATE_CW)
+    _add(view_menu, catalog, ActionId.ROTATE_CCW)
+    _add(view_menu, catalog, ActionId.FLIP_HORIZONTAL)
+    _add(view_menu, catalog, ActionId.FLIP_VERTICAL)
+    view_menu.addSeparator()
+    _add(view_menu, catalog, ActionId.INVERT)
+    _add(view_menu, catalog, ActionId.PLAY_CINE)
+    view_menu.addSeparator()
+    _add(view_menu, catalog, ActionId.TOGGLE_INFO_OVERLAY)
 
     tools_menu = menu_bar.addMenu("&Tools")
     _add(tools_menu, catalog, ActionId.WINDOW_LEVEL)
-    preset_actions = _add_window_presets(tools_menu, window_presets, on_window_preset)
+    presets_menu, preset_actions = create_window_presets_menu(
+        tools_menu, window_presets, on_window_preset, on_manage_presets
+    )
+    tools_menu.addSeparator()
     _add(tools_menu, catalog, ActionId.MEASURE)
-    _add(tools_menu, catalog, ActionId.INSPECT_DICOM)
-    if on_clear_measurements is not None:
+    _add(tools_menu, catalog, ActionId.ANNOTATE_POINT)
+    _add(tools_menu, catalog, ActionId.ANNOTATE_ARROW)
+    _add(tools_menu, catalog, ActionId.ANNOTATE_TEXT)
+    if on_clear_measurements is not None or on_clear_annotations is not None:
         tools_menu.addSeparator()
-        _add(tools_menu, catalog, ActionId.CLEAR_MEASUREMENTS)
+        if on_clear_measurements is not None:
+            _add(tools_menu, catalog, ActionId.CLEAR_MEASUREMENTS)
+        if on_clear_annotations is not None:
+            _add(tools_menu, catalog, ActionId.CLEAR_ANNOTATIONS)
+    tools_menu.addSeparator()
+    _add(tools_menu, catalog, ActionId.INSPECT_DICOM)
     _add(tools_menu, catalog, ActionId.SCREENSHOT)
 
     window_menu = menu_bar.addMenu("&Window")
@@ -63,18 +97,41 @@ def populate_menu_bar(
 
     help_menu = menu_bar.addMenu("&Help")
     _add(help_menu, catalog, ActionId.ABOUT)
-    return preset_actions
+    return MenuHandles(preset_actions=preset_actions, presets_menu=presets_menu)
 
 
-def _add_window_presets(
+def create_window_presets_menu(
     tools_menu: QMenu,
     presets: Sequence[WindowPreset],
     on_window_preset: Callable[[WindowPreset], None] | None,
-) -> tuple[QAction, ...]:
-    """Add a Window Presets submenu, returning its actions."""
-    if not presets:
-        return ()
+    on_manage_presets: Callable[[], None] | None,
+) -> tuple[QMenu, tuple[QAction, ...]]:
+    """Create the Window Presets submenu with a trailing Manage entry."""
     submenu = tools_menu.addMenu("Window &Presets")
+    submenu.setObjectName("windowPresetsMenu")
+    manage_action = QAction("&Manage Presets...", submenu)
+    manage_action.setObjectName(_MANAGE_PRESETS_OBJECT)
+    manage_action.setStatusTip("Create, edit and delete custom window presets")
+    if on_manage_presets is not None:
+        manage_action.triggered.connect(lambda _checked=False: on_manage_presets())
+    submenu.setProperty("manageAction", manage_action)
+    actions = refresh_window_presets_menu(submenu, presets, on_window_preset)
+    return submenu, actions
+
+
+def refresh_window_presets_menu(
+    submenu: QMenu,
+    presets: Sequence[WindowPreset],
+    on_window_preset: Callable[[WindowPreset], None] | None,
+) -> tuple[QAction, ...]:
+    """Rebuild ``submenu`` content as ``presets... | --- | Manage``.
+
+    The Manage entry is preserved across rebuilds so its handler survives;
+    everything else is recreated from ``presets``.
+    """
+    manage_action = submenu.property("manageAction")
+    for action in list(submenu.actions()):
+        submenu.removeAction(action)
     actions: list[QAction] = []
     for preset in presets:
         action = QAction(preset.name, submenu)
@@ -83,6 +140,9 @@ def _add_window_presets(
             action.triggered.connect(lambda _checked=False, p=preset: on_window_preset(p))
         submenu.addAction(action)
         actions.append(action)
+    if isinstance(manage_action, QAction):
+        submenu.addSeparator()
+        submenu.addAction(manage_action)
     return tuple(actions)
 
 
@@ -138,6 +198,9 @@ def create_toolbar(main_window: QMainWindow, catalog: ActionCatalog) -> QToolBar
     toolbar.addSeparator()
     _add(toolbar, catalog, ActionId.WINDOW_LEVEL)
     _add(toolbar, catalog, ActionId.MEASURE)
+    _add(toolbar, catalog, ActionId.ANNOTATE_POINT)
+    _add(toolbar, catalog, ActionId.INVERT)
+    _add(toolbar, catalog, ActionId.PLAY_CINE)
     _add(toolbar, catalog, ActionId.SCREENSHOT)
     toolbar.addSeparator()
     _add(toolbar, catalog, ActionId.SETTINGS)

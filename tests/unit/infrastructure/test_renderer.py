@@ -64,6 +64,47 @@ def test_render_inverts_monochrome1() -> None:
     assert dark.data != inverted.data
 
 
+def test_display_invert_cancels_monochrome1_polarity() -> None:
+    pixels = _grayscale()
+    mono1 = PixelArray(
+        pixels=pixels.pixels,
+        width=16,
+        height=16,
+        photometric_interpretation="MONOCHROME1",
+    )
+    renderer = NumpyViewRenderer()
+    plain = renderer.render(pixels, Viewport.initial())
+    both_inverted = renderer.render(mono1, Viewport.initial().toggle_invert())
+    assert plain.data == both_inverted.data
+
+
+def test_display_invert_flips_monochrome2_output() -> None:
+    renderer = NumpyViewRenderer()
+    pixels = _grayscale()
+    normal = renderer.render(pixels, Viewport.initial())
+    inverted = renderer.render(pixels, Viewport.initial().toggle_invert())
+    assert normal.data != inverted.data
+    # Inverting twice returns to the original mapping.
+    restored = renderer.render(pixels, Viewport.initial().toggle_invert().toggle_invert())
+    assert restored.data == normal.data
+
+
+def test_display_invert_flips_color_output() -> None:
+    ramp = np.tile(np.arange(64, dtype=np.uint16), (8, 1))
+    color = PixelArray(
+        pixels=np.stack((ramp, ramp, ramp), axis=-1),
+        width=64,
+        height=8,
+        samples=3,
+        photometric_interpretation="RGB",
+    )
+    renderer = NumpyViewRenderer()
+    normal = renderer.render(color, Viewport.initial())
+    inverted = renderer.render(color, Viewport.initial().toggle_invert())
+    assert normal.validate() and inverted.validate()
+    assert normal.data != inverted.data
+
+
 def test_render_color_produces_frame() -> None:
     color = PixelArray(
         pixels=np.zeros((8, 8, 3), dtype=np.uint16),

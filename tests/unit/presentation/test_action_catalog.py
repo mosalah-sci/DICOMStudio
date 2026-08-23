@@ -30,6 +30,16 @@ _ENABLED_IDS = (
     ActionId.EXPORT_IMAGE,
     ActionId.SCREENSHOT,
     ActionId.INSPECT_DICOM,
+    ActionId.ROTATE_CW,
+    ActionId.ROTATE_CCW,
+    ActionId.FLIP_HORIZONTAL,
+    ActionId.FLIP_VERTICAL,
+    ActionId.INVERT,
+    ActionId.ANNOTATE_POINT,
+    ActionId.ANNOTATE_ARROW,
+    ActionId.ANNOTATE_TEXT,
+    ActionId.TOGGLE_INFO_OVERLAY,
+    ActionId.MANAGE_WINDOW_PRESETS,
 )
 
 
@@ -60,6 +70,8 @@ def test_catalog_requires_a_handler_for_every_enabled_action(
 def test_unavailable_actions_exist_but_are_disabled(catalog: ActionCatalog) -> None:
     assert not catalog.action(ActionId.OPEN_FILES).isEnabled()
     assert not catalog.action(ActionId.CLEAR_MEASUREMENTS).isEnabled()
+    assert not catalog.action(ActionId.CLEAR_ANNOTATIONS).isEnabled()
+    assert not catalog.action(ActionId.PLAY_CINE).isEnabled()
     assert catalog.action(ActionId.ZOOM_IN).isEnabled()
     assert catalog.action(ActionId.OPEN_FOLDER).isEnabled()
     assert catalog.action(ActionId.SETTINGS).isEnabled()
@@ -68,6 +80,28 @@ def test_unavailable_actions_exist_but_are_disabled(catalog: ActionCatalog) -> N
 def test_measure_action_is_checkable(catalog: ActionCatalog) -> None:
     assert catalog.action(ActionId.MEASURE).isCheckable()
     assert catalog.action(ActionId.MEASURE).isEnabled()
+
+
+def test_annotation_actions_are_checkable(catalog: ActionCatalog) -> None:
+    for action_id in (
+        ActionId.ANNOTATE_POINT,
+        ActionId.ANNOTATE_ARROW,
+        ActionId.ANNOTATE_TEXT,
+    ):
+        assert catalog.action(action_id).isCheckable()
+        assert catalog.action(action_id).isEnabled()
+
+
+def test_play_cine_is_checkable_with_space_shortcut(catalog: ActionCatalog) -> None:
+    action = catalog.action(ActionId.PLAY_CINE)
+    assert action.isCheckable()
+    assert action.shortcut().toString() == "Space"
+
+
+def test_info_overlay_toggle_is_checkable(catalog: ActionCatalog) -> None:
+    action = catalog.action(ActionId.TOGGLE_INFO_OVERLAY)
+    assert action.isCheckable()
+    assert action.isEnabled()
 
 
 def test_enabled_actions_are_wired(catalog: ActionCatalog) -> None:
