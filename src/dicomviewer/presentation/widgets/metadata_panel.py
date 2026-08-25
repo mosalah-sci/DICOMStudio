@@ -176,7 +176,7 @@ class MetadataPanel(QWidget):
         except Exception:
             # A malformed file must not crash the panel; treat it as
             # unavailable and surface the problem to the user.
-            logger.exception("Unexpected metadata extraction failure for %s", image.path)
+            logger.exception("Unexpected metadata extraction failure for {}", image.path)
             return None
         self._cache[image.path] = document
         self._evict_cache()
