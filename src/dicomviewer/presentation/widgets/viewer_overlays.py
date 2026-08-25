@@ -1,22 +1,38 @@
 """Painting helpers for the viewer's informational overlays.
 
 Small pure formatters plus thin QPainter routines so the viewer widget stays
-focused on input handling. Everything is deterministic and covered by
-offscreen unit tests.
+focused on input handling and paint coordination. Everything is deterministic
+and covered by offscreen unit tests.
 """
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from math import atan2, cos, sin
 
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QFontMetricsF, QPainter
+from PySide6.QtGui import QColor, QFontMetricsF, QPainter, QPen, QPolygonF
 
+from dicomviewer.application.measurement import measurement_label
+from dicomviewer.domain.annotation import Annotation, AnnotationKind
+from dicomviewer.domain.measurement import Measurement, MeasurementKind, Point
 from dicomviewer.domain.viewport import Viewport
 
 _HISTOGRAM_WIDTH = 120.0
 _HISTOGRAM_HEIGHT = 36.0
+
+# Completed-overlay style constants (verbatim from the previous in-widget
+# implementations; changing any of them changes rendered output).
+ANNOTATION_COLOR = "#a78bfa"
+SELECTION_HALO_COLOR = "#ffffff"
+MEASUREMENT_PEN_WIDTH = 1.5
+ENDPOINT_RADIUS = 3.0
+POINT_RADIUS = 3.5
+SELECTION_HALO_RADIUS = 7.0
+ARROWHEAD_WIDGET_LENGTH = 10.0
+
+PointMapper = Callable[[Point], QPointF]
 
 
 @dataclass(frozen=True)
@@ -201,3 +217,90 @@ def paint_series_info(
     """Draw the demographic block top-left and the study block top-right."""
     draw_left_aligned_block(painter, rect, patient_lines(info))
     draw_right_aligned_block(painter, rect, study_lines(info))
+
+
+def draw_measurement(
+    painter: QPainter,
+    measurement: Measurement,
+    *,
+    pixel_spacing: tuple[float, float] | None,
+    color: str,
+    map_point: PointMapper,
+) -> None:
+    """Draw one completed measurement with its handle points and label.
+
+    ``map_point`` converts image pixel coordinates to widget space using the
+    viewer's current transform.
+    """
+    points = [map_point(point) for point in measurement.points]
+    painter.save()
+    pen_color = QColor(color)
+    painter.setPen(QPen(pen_color, MEASUREMENT_PEN_WIDTH))
+    painter.setBrush(pen_color)
+    for point in points:
+        painter.drawEllipse(point, ENDPOINT_RADIUS, ENDPOINT_RADIUS)
+    label = measurement_label(measurement, pixel_spacing)
+    if measurement.kind is MeasurementKind.DISTANCE:
+        painter.drawLine(points[0], points[1])
+        midpoint = QPointF(
+            (points[0].x() + points[1].x()) / 2.0,
+            (points[0].y() + points[1].y()) / 2.0,
+        )
+        draw_label_box(painter, label, midpoint)
+    else:
+        painter.drawLine(points[0], points[1])
+        painter.drawLine(points[0], points[2])
+        label_point = QPointF(
+            (points[0].x() + (points[1].x() + points[2].x()) / 2.0) / 2.0,
+            (points[0].y() + (points[1].y() + points[2].y()) / 2.0) / 2.0,
+        )
+        draw_label_box(painter, label, label_point)
+    painter.restore()
+
+
+def arrowhead_corner(anchor: QPointF, tip: QPointF, side: float) -> QPointF:
+    """Return one arrowhead base corner beside ``tip`` in widget space."""
+    length = ARROWHEAD_WIDGET_LENGTH
+    dx = tip.x() - anchor.x()
+    dy = tip.y() - anchor.y()
+    angle = atan2(dy, dx)
+    spread = atan2(length, length * 2.0) * side
+    return QPointF(
+        tip.x() - length * cos(angle + spread),
+        tip.y() - length * sin(angle + spread),
+    )
+
+
+def draw_annotation(
+    painter: QPainter,
+    annotation: Annotation,
+    *,
+    is_selected: bool,
+    map_point: PointMapper,
+) -> None:
+    """Draw one completed annotation in image-anchored widget space."""
+    anchor = map_point(annotation.anchor)
+    color = QColor(ANNOTATION_COLOR)
+    painter.save()
+    painter.setBrush(color)
+    if is_selected:
+        halo = QPen(QColor(SELECTION_HALO_COLOR), 1.0, Qt.PenStyle.DashLine)
+        painter.setPen(halo)
+        painter.drawEllipse(anchor, SELECTION_HALO_RADIUS, SELECTION_HALO_RADIUS)
+    painter.setPen(QPen(color, MEASUREMENT_PEN_WIDTH))
+    if annotation.kind is AnnotationKind.POINT:
+        painter.drawEllipse(anchor, POINT_RADIUS, POINT_RADIUS)
+    elif annotation.tip is not None:
+        tip = map_point(annotation.tip)
+        painter.drawLine(anchor, tip)
+        head = QPolygonF(
+            [
+                tip,
+                arrowhead_corner(anchor, tip, +1.0),
+                arrowhead_corner(anchor, tip, -1.0),
+            ]
+        )
+        painter.drawPolygon(head)
+    else:
+        draw_label_box(painter, annotation.text, anchor)
+    painter.restore()

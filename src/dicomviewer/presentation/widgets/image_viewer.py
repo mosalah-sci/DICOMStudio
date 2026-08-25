@@ -10,20 +10,16 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import replace
-from math import atan2, cos, sin
 
 from loguru import logger
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import (
-    QColor,
     QFontMetricsF,
     QImage,
     QKeyEvent,
     QMouseEvent,
     QPainter,
     QPaintEvent,
-    QPen,
-    QPolygonF,
     QWheelEvent,
 )
 from PySide6.QtWidgets import QWidget
@@ -48,7 +44,7 @@ from dicomviewer.presentation.imaging.rendered_image import (
     rendered_image_from_qimage,
     to_qimage,
 )
-from dicomviewer.presentation.widgets import viewer_transform
+from dicomviewer.presentation.widgets import viewer_overlays, viewer_transform
 from dicomviewer.presentation.widgets.annotation_tool import AnnotationTool
 from dicomviewer.presentation.widgets.measurement_tool import MeasurementTool
 from dicomviewer.presentation.widgets.viewer_overlays import (
@@ -75,8 +71,6 @@ _DEFAULT_CACHE_SIZE = 3
 # keeps the render cache from competing with the user-configured decode cache.
 _RENDER_CACHE_SIZE = 2
 _HISTOGRAM_BINS = 128
-_ANNOTATION_COLOR = "#a78bfa"
-_ARROWHEAD_WIDGET_LENGTH = 10.0
 
 
 class ImageViewerWidget(QWidget):
@@ -432,7 +426,8 @@ class ImageViewerWidget(QWidget):
         The widget position is first expressed in display space, then run
         through the inverse of the orientation transform applied at paint
         time so annotations land on the same anatomy regardless of rotation
-        or flips.
+        or flips. Without a displayed frame the raw widget position passes
+        through unchanged.
         """
         image = self._qimage
         if image is None or image.isNull():
@@ -447,7 +442,10 @@ class ImageViewerWidget(QWidget):
         )
 
     def image_to_widget(self, point: Point) -> QPointF:
-        """Map an image pixel coordinate into widget coordinates."""
+        """Map an image pixel coordinate into widget coordinates.
+
+        Without a displayed frame the point is returned untransformed.
+        """
         image = self._qimage
         if image is None or image.isNull():
             return QPointF(point.x, point.y)
@@ -802,10 +800,6 @@ class ImageViewerWidget(QWidget):
         logger.warning("Image display issue: {}", exc)
         self._last_error = message
 
-    def _display_size(self, image: QImage) -> tuple[int, int]:
-        """Return the on-screen size of ``image`` after orientation."""
-        return oriented_size(image.width(), image.height(), self._viewport.rotation)
-
     def _effective_scale(self) -> float:
         """Return the scale factor that maps display pixels to widget pixels.
 
@@ -909,7 +903,13 @@ class ImageViewerWidget(QWidget):
         measurements = self._measurements.for_slice(self.current_slice)
         pixel_spacing = self._measurements.pixel_spacing
         for measurement in measurements:
-            self._draw_measurement(painter, measurement, pixel_spacing)
+            viewer_overlays.draw_measurement(
+                painter,
+                measurement,
+                pixel_spacing=pixel_spacing,
+                color=self._measurement_color,
+                map_point=self.image_to_widget,
+            )
         if self._show_measurement_overlay and self._measure_tool.is_active():
             draft = self._measure_tool.draft_points()
             preview = self._measure_tool.preview_point()
@@ -929,38 +929,6 @@ class ImageViewerWidget(QWidget):
                 draw_label_box(painter, label, midpoint)
             self._measure_tool.paint(painter)
 
-    def _draw_measurement(
-        self,
-        painter: QPainter,
-        measurement: Measurement,
-        pixel_spacing: tuple[float, float] | None,
-    ) -> None:
-        """Draw one completed measurement with its handle points and label."""
-        points = [self.image_to_widget(point) for point in measurement.points]
-        painter.save()
-        pen_color = QColor(self._measurement_color)
-        painter.setPen(QPen(pen_color, 1.5))
-        painter.setBrush(pen_color)
-        for point in points:
-            painter.drawEllipse(point, 3.0, 3.0)
-        label = measurement_label(measurement, pixel_spacing)
-        if measurement.kind is MeasurementKind.DISTANCE:
-            painter.drawLine(points[0], points[1])
-            midpoint = QPointF(
-                (points[0].x() + points[1].x()) / 2.0,
-                (points[0].y() + points[1].y()) / 2.0,
-            )
-            draw_label_box(painter, label, midpoint)
-        else:
-            painter.drawLine(points[0], points[1])
-            painter.drawLine(points[0], points[2])
-            label_point = QPointF(
-                (points[0].x() + (points[1].x() + points[2].x()) / 2.0) / 2.0,
-                (points[0].y() + (points[1].y() + points[2].y()) / 2.0) / 2.0,
-            )
-            draw_label_box(painter, label, label_point)
-        painter.restore()
-
     def _on_measurement_committed(self, measurement: Measurement) -> None:
         """Store a completed measurement and notify listeners."""
         self._measurements.add(self.current_slice, measurement)
@@ -978,55 +946,14 @@ class ImageViewerWidget(QWidget):
         annotations = self._annotations.for_slice(self.current_slice)
         selected = self._annotation_tool.selected()
         for annotation in annotations:
-            self._draw_annotation(painter, annotation, is_selected=annotation is selected)
+            viewer_overlays.draw_annotation(
+                painter,
+                annotation,
+                is_selected=annotation is selected,
+                map_point=self.image_to_widget,
+            )
         if self._annotation_tool.is_active():
             self._annotation_tool.paint(painter)
-
-    def _draw_annotation(
-        self,
-        painter: QPainter,
-        annotation: Annotation,
-        *,
-        is_selected: bool,
-    ) -> None:
-        """Draw one completed annotation in image-anchored widget space."""
-        anchor = self.image_to_widget(annotation.anchor)
-        color = QColor(_ANNOTATION_COLOR)
-        painter.save()
-        painter.setBrush(color)
-        if is_selected:
-            halo = QPen(QColor("#ffffff"), 1.0, Qt.PenStyle.DashLine)
-            painter.setPen(halo)
-            painter.drawEllipse(anchor, 7.0, 7.0)
-        painter.setPen(QPen(color, 1.5))
-        if annotation.kind is AnnotationKind.POINT:
-            painter.drawEllipse(anchor, 3.5, 3.5)
-        elif annotation.tip is not None:
-            tip = self.image_to_widget(annotation.tip)
-            painter.drawLine(anchor, tip)
-            head = QPolygonF(
-                [
-                    tip,
-                    self._arrowhead_corner(anchor, tip, +1.0),
-                    self._arrowhead_corner(anchor, tip, -1.0),
-                ]
-            )
-            painter.drawPolygon(head)
-        else:
-            draw_label_box(painter, annotation.text, anchor)
-        painter.restore()
-
-    def _arrowhead_corner(self, anchor: QPointF, tip: QPointF, side: float) -> QPointF:
-        """Return one arrowhead base corner beside ``tip`` in widget space."""
-        length = _ARROWHEAD_WIDGET_LENGTH
-        dx = tip.x() - anchor.x()
-        dy = tip.y() - anchor.y()
-        angle = atan2(dy, dx)
-        spread = atan2(length, length * 2.0) * side
-        return QPointF(
-            tip.x() - length * cos(angle + spread),
-            tip.y() - length * sin(angle + spread),
-        )
 
     def _paint_histogram(self, painter: QPainter, origin: QPointF) -> None:
         """Draw a small bar histogram for the current slice."""
