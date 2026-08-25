@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 from PySide6.QtWidgets import QApplication
 
-from dicomviewer.application.theme_manager import ThemeManager
+from dicomviewer.application.settings_manager import SettingsManager
 from dicomviewer.infrastructure.configuration.settings_service import (
     SettingsService,
     load_default_settings,
@@ -74,16 +74,16 @@ def make_window(
         settings_path = tmp_path / "settings.toml"
         settings_service = SettingsService(load_default_settings(), settings_path)
         settings = settings_service.load()
-        theme_manager = ThemeManager(settings_service, settings)
+        settings_manager = SettingsManager(settings_service, settings)
         if theme != "dark":
-            theme_manager.apply_override(theme)
-        theme_controller = ThemeController(theme_manager, ThemeProvider(qapp), icon_provider)
+            settings_manager.apply_override(theme)
+        theme_controller = ThemeController(settings_manager, ThemeProvider(qapp), icon_provider)
         window_state_store = JsonWindowStateStore(tmp_path / "window_state.json")
         return MainWindow(
             APP_NAME,
             version,
             theme_controller,
-            settings_manager=theme_manager,
+            settings_manager=settings_manager,
             window_state_store=window_state_store,
             icon_provider=icon_provider,
             study_scanner=study_scanner or FakeStudyScanner(),

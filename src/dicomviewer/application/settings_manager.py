@@ -15,7 +15,7 @@ from dicomviewer.application.settings_store import SettingsStore
 from dicomviewer.domain.settings import AppearanceSettings, Settings
 
 
-class ThemeManager:
+class SettingsManager:
     """Tracks and persists the active theme and user preferences.
 
     The manager owns the current settings snapshot. ``switch`` validates the

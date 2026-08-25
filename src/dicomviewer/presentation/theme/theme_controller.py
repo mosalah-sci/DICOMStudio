@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dicomviewer.application.theme_manager import ThemeManager
+from dicomviewer.application.settings_manager import SettingsManager
 from dicomviewer.presentation.theme.icon_provider import IconProvider
 from dicomviewer.presentation.theme.theme_provider import ThemeProvider
 from dicomviewer.presentation.theme.themes import THEMES
@@ -13,7 +13,7 @@ class ThemeController:
 
     def __init__(
         self,
-        manager: ThemeManager,
+        manager: SettingsManager,
         provider: ThemeProvider,
         icons: IconProvider,
     ) -> None:

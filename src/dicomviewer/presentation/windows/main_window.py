@@ -40,7 +40,7 @@ from dicomviewer.application.inspection import TagInspector
 from dicomviewer.application.measurement import MeasurementCollection
 from dicomviewer.application.metadata import MetadataService
 from dicomviewer.application.processing import ImageAnalyzer
-from dicomviewer.application.theme_manager import ThemeManager
+from dicomviewer.application.settings_manager import SettingsManager
 from dicomviewer.application.viewing import PixelDecoder, ViewRenderer
 from dicomviewer.application.window_state_store import WindowState, WindowStateStore
 from dicomviewer.domain.annotation import AnnotationKind
@@ -137,7 +137,7 @@ class MainWindow(QMainWindow):
         app_name: str,
         version: str,
         theme_controller: ThemeController,
-        settings_manager: ThemeManager,
+        settings_manager: SettingsManager,
         window_state_store: WindowStateStore,
         icon_provider: IconProvider,
         study_scanner: StudyScanner,

@@ -19,7 +19,7 @@ from PySide6.QtWidgets import QApplication
 
 from dicomviewer import __version__
 from dicomviewer.application.processing import ProcessingPipeline
-from dicomviewer.application.theme_manager import ThemeManager
+from dicomviewer.application.settings_manager import SettingsManager
 from dicomviewer.domain.settings import SettingsError
 from dicomviewer.infrastructure.configuration.settings_service import build_settings_service
 from dicomviewer.infrastructure.dicom.metadata_reader import PydicomMetadataService
@@ -72,9 +72,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         settings_service = build_settings_service(paths)
         settings = settings_service.load()
-        theme_manager = ThemeManager(settings_service, settings)
+        settings_manager = SettingsManager(settings_service, settings)
         if options.theme is not None:
-            theme_manager.apply_override(options.theme)
+            settings_manager.apply_override(options.theme)
     except SettingsError as exc:
         logger.error("Configuration error: {}", exc)
         _write(f"{APP_NAME}: {exc}", stream=sys.stderr)
@@ -84,13 +84,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     logger.info("Starting {name} {version}", name=APP_NAME, version=__version__)
     icon_provider = IconProvider(_icons_dir())
     application.setWindowIcon(icon_provider.brand_icon())
-    theme_controller = ThemeController(theme_manager, ThemeProvider(application), icon_provider)
+    theme_controller = ThemeController(settings_manager, ThemeProvider(application), icon_provider)
     window_state_store = JsonWindowStateStore(paths.config_dir / "window_state.json")
     window = MainWindow(
         APP_NAME,
         __version__,
         theme_controller,
-        settings_manager=theme_manager,
+        settings_manager=settings_manager,
         window_state_store=window_state_store,
         icon_provider=icon_provider,
         study_scanner=PydicomStudyScanner(),
