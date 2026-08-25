@@ -41,25 +41,14 @@ from dicomviewer.application.viewing import (
 )
 from dicomviewer.domain.annotation import Annotation, AnnotationKind
 from dicomviewer.domain.image_processing import WindowPreset
-from dicomviewer.domain.measurement import (
-    DEFAULT_HIT_TOLERANCE,
-    Measurement,
-    MeasurementKind,
-    Point,
-)
+from dicomviewer.domain.measurement import Measurement, MeasurementKind, Point
 from dicomviewer.domain.studies import Image
-from dicomviewer.domain.viewport import (
-    FitMode,
-    Viewport,
-    clamp_slice,
-    orient_point,
-    oriented_size,
-    unorient_point,
-)
+from dicomviewer.domain.viewport import FitMode, Viewport, clamp_slice
 from dicomviewer.presentation.imaging.rendered_image import (
     rendered_image_from_qimage,
     to_qimage,
 )
+from dicomviewer.presentation.widgets import viewer_transform
 from dicomviewer.presentation.widgets.annotation_tool import AnnotationTool
 from dicomviewer.presentation.widgets.measurement_tool import MeasurementTool
 from dicomviewer.presentation.widgets.viewer_overlays import (
@@ -87,7 +76,6 @@ _DEFAULT_CACHE_SIZE = 3
 _RENDER_CACHE_SIZE = 2
 _HISTOGRAM_BINS = 128
 _ANNOTATION_COLOR = "#a78bfa"
-_HIT_TOLERANCE_WIDGET = 8.0
 _ARROWHEAD_WIDGET_LENGTH = 10.0
 
 
@@ -411,10 +399,7 @@ class ImageViewerWidget(QWidget):
         The constant widget-space slop is converted with the current display
         scale and clamped so it stays usable at extreme zoom levels.
         """
-        scale = self._effective_scale()
-        if scale <= 0.0:
-            return DEFAULT_HIT_TOLERANCE
-        return min(max(_HIT_TOLERANCE_WIDGET / scale, 1.0), 64.0)
+        return viewer_transform.hit_tolerance(self._effective_scale())
 
     def set_max_cache(self, size: int) -> None:
         """Set the decode cache size and evict entries beyond it."""
@@ -452,26 +437,13 @@ class ImageViewerWidget(QWidget):
         image = self._qimage
         if image is None or image.isNull():
             return Point(position.x(), position.y())
-        rect = self._target_rect(image)
-        if rect.width() <= 0 or rect.height() <= 0:
-            return Point(0.0, 0.0)
-        display_width, display_height = oriented_size(
-            image.width(), image.height(), self._viewport.rotation
-        )
-        display_x = (position.x() - rect.left()) / rect.width() * display_width
-        display_y = (position.y() - rect.top()) / rect.height() * display_height
-        point = unorient_point(
-            display_x,
-            display_y,
+        return viewer_transform.widget_to_image(
+            self._viewport,
             image.width(),
             image.height(),
-            self._viewport.rotation,
-            self._viewport.flip_h,
-            self._viewport.flip_v,
-        )
-        return Point(
-            min(max(point[0], 0.0), float(image.width() - 1)),
-            min(max(point[1], 0.0), float(image.height() - 1)),
+            self.width(),
+            self.height(),
+            position,
         )
 
     def image_to_widget(self, point: Point) -> QPointF:
@@ -479,24 +451,13 @@ class ImageViewerWidget(QWidget):
         image = self._qimage
         if image is None or image.isNull():
             return QPointF(point.x, point.y)
-        rect = self._target_rect(image)
-        if rect.width() <= 0 or rect.height() <= 0:
-            return QPointF(rect.left(), rect.top())
-        display_width, display_height = oriented_size(
-            image.width(), image.height(), self._viewport.rotation
-        )
-        display_x, display_y = orient_point(
-            point.x,
-            point.y,
+        return viewer_transform.image_to_widget(
+            self._viewport,
             image.width(),
             image.height(),
-            self._viewport.rotation,
-            self._viewport.flip_h,
-            self._viewport.flip_v,
-        )
-        return QPointF(
-            rect.left() + display_x / display_width * rect.width(),
-            rect.top() + display_y / display_height * rect.height(),
+            self.width(),
+            self.height(),
+            point,
         )
 
     def capture_view(self) -> RenderedImage:
@@ -846,21 +807,20 @@ class ImageViewerWidget(QWidget):
         return oriented_size(image.width(), image.height(), self._viewport.rotation)
 
     def _effective_scale(self) -> float:
-        """Return the scale factor that maps display pixels to widget pixels."""
+        """Return the scale factor that maps display pixels to widget pixels.
+
+        Without a displayed frame the scale is defined as 1.0.
+        """
         image = self._qimage
         if image is None or image.isNull():
             return 1.0
-        display_width, display_height = self._display_size(image)
-        if display_width <= 0 or display_height <= 0:
-            return 1.0
-        if self._viewport.fit_mode == FitMode.FIT:
-            return min(
-                self.width() / display_width,
-                self.height() / display_height,
-            )
-        if self._viewport.fit_mode == FitMode.ACTUAL:
-            return 1.0
-        return self._viewport.zoom
+        return viewer_transform.effective_scale(
+            self._viewport,
+            image.width(),
+            image.height(),
+            self.width(),
+            self.height(),
+        )
 
     def _zoom_base(self) -> float:
         """Return the scale a relative zoom step should start from.
@@ -868,25 +828,18 @@ class ImageViewerWidget(QWidget):
         In fit mode the stored zoom is a placeholder, so the effective display
         scale is used as the base; otherwise the current free zoom applies.
         """
-        if self._viewport.fit_mode == FitMode.FIT:
-            return self._effective_scale()
-        return self._viewport.zoom
+        if self._viewport.fit_mode != FitMode.FIT:
+            return self._viewport.zoom
+        return self._effective_scale()
 
     def _target_rect(self, image: QImage) -> QRectF:
-        """Return the destination rectangle for the rendered frame.
-
-        The rectangle covers the oriented display size; the paint transform
-        rotates/flips the frame inside it.
-        """
-        scale = self._effective_scale()
-        target_width, target_height = (dimension * scale for dimension in self._display_size(image))
-        center_x = self.width() / 2.0 + self._viewport.pan_x * scale
-        center_y = self.height() / 2.0 + self._viewport.pan_y * scale
-        return QRectF(
-            center_x - target_width / 2.0,
-            center_y - target_height / 2.0,
-            target_width,
-            target_height,
+        """Return the destination rectangle for the rendered frame."""
+        return viewer_transform.target_rect(
+            self._viewport,
+            image.width(),
+            image.height(),
+            self.width(),
+            self.height(),
         )
 
     def _paint_overlay(self, painter: QPainter) -> None:
