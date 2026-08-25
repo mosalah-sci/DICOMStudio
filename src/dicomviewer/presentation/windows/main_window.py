@@ -11,11 +11,8 @@ from loguru import logger
 from PySide6.QtCore import (
     QByteArray,
     QMimeData,
-    QObject,
     QStandardPaths,
     QThread,
-    Signal,
-    Slot,
 )
 from PySide6.QtGui import (
     QAction,
@@ -84,44 +81,11 @@ from dicomviewer.presentation.widgets.status_bar import StatusBar
 from dicomviewer.presentation.widgets.study_explorer_panel import StudyExplorerPanel
 from dicomviewer.presentation.widgets.viewer_overlays import SeriesOverlayInfo
 from dicomviewer.presentation.widgets.viewer_panel import ViewerPanel
+from dicomviewer.presentation.workers.scan_controller import ScanController, ScanRelay
 from dicomviewer.presentation.workers.scan_worker import StudyScanWorker
 from dicomviewer.shared.constants import SIDEBAR_WIDTHS
 
 _STATE_VERSION = 1
-
-
-class _ScanRelay(QObject):
-    """Forward worker results to the main thread with scan metadata.
-
-    The worker emits from its own thread, so its signals must not deliver
-    GUI-affecting work directly. This relay lives in the main thread, carries
-    the generation/folder of one scan, and re-emits with those values.
-    """
-
-    progress = Signal(int, int, int, str)  # generation, scanned, invalid, folder
-    finished = Signal(int, Path, object)  # generation, folder, StudyTree
-    failed = Signal(int, str)
-
-    def __init__(self, generation: int, folder: Path, parent: QObject | None = None) -> None:
-        """Create a relay for one scan run."""
-        super().__init__(parent)
-        self._generation = generation
-        self._folder = folder
-
-    @Slot(int, int)
-    def on_progress(self, scanned: int, invalid: int) -> None:
-        """Forward throttled progress counts to the main thread."""
-        self.progress.emit(self._generation, scanned, invalid, str(self._folder))
-
-    @Slot(object)
-    def on_finished(self, tree: StudyTree) -> None:
-        """Forward a completed scan to the main thread."""
-        self.finished.emit(self._generation, self._folder, tree)
-
-    @Slot(str)
-    def on_failed(self, message: str) -> None:
-        """Forward a failed scan to the main thread."""
-        self.failed.emit(self._generation, message)
 
 
 class MainWindow(QMainWindow):
@@ -161,7 +125,6 @@ class MainWindow(QMainWindow):
         self._window_state_store = window_state_store
         self._icon_provider = icon_provider
         self.setWindowIcon(icon_provider.brand_icon())
-        self._study_scanner = study_scanner
         self._thumbnail_service = thumbnail_service
         self._pixel_decoder = pixel_decoder
         self._view_renderer = view_renderer
@@ -170,10 +133,10 @@ class MainWindow(QMainWindow):
         self._image_exporter = image_exporter
         self._tag_inspector = tag_inspector
         self._screenshot_dir = screenshot_dir
-        self._scan_thread: QThread | None = None
-        self._scan_worker: StudyScanWorker | None = None
-        self._scan_relay: _ScanRelay | None = None
-        self._scan_generation = 0
+        self._scan_controller = ScanController(study_scanner, parent=self)
+        self._scan_controller.progress.connect(self._on_scan_progress)
+        self._scan_controller.finished.connect(self._on_scan_finished)
+        self._scan_controller.failed.connect(self._on_scan_failed)
         self._current_series: Series | None = None
         self._study_tree: StudyTree | None = None
         self._preset_actions: tuple[QAction, ...] = ()
@@ -396,10 +359,34 @@ class MainWindow(QMainWindow):
             return
         self._start_scan(Path(folder))
 
+    @property
+    def _scan_generation(self) -> int:
+        """Current scan generation, delegated to the scan controller."""
+        return self._scan_controller.generation
+
+    @property
+    def _scan_thread(self) -> QThread | None:
+        """Live scan thread, delegated to the scan controller."""
+        return self._scan_controller.scan_thread
+
+    @property
+    def _scan_worker(self) -> StudyScanWorker | None:
+        """Live scan worker, delegated to the scan controller."""
+        return self._scan_controller.scan_worker
+
+    @property
+    def _scan_relay(self) -> ScanRelay | None:
+        """Live scan relay, delegated to the scan controller."""
+        return self._scan_controller.scan_relay
+
     def _start_scan(self, folder: Path) -> None:
-        """Start a background scan of ``folder``, cancelling any previous one."""
-        self._scan_generation += 1
-        generation = self._scan_generation
+        """Start a background scan of ``folder``, cancelling any previous one.
+
+        The controller is started first so a superseding generation is
+        already in place while the remaining (possibly re-entrant) UI
+        reactions run, matching the previous ordering.
+        """
+        self._scan_controller.start(folder)
         try:
             self._settings_manager.add_recent_folder(folder)
         except SettingsError as exc:
@@ -414,55 +401,12 @@ class MainWindow(QMainWindow):
         self._metadata_panel.show_initial()
         self._status_bar.showMessage(f"Scanning {folder}…")
 
-        worker = StudyScanWorker(self._study_scanner, folder)
-        relay = _ScanRelay(generation, folder)
-        thread = QThread(self)
-        thread.setObjectName("study-scan")
-        worker.moveToThread(thread)
-        thread.started.connect(worker.run)
-        worker.progress.connect(relay.on_progress)
-        worker.finished.connect(relay.on_finished)
-        worker.failed.connect(relay.on_failed)
-        worker.finished.connect(worker.deleteLater)
-        worker.failed.connect(worker.deleteLater)
-        worker.finished.connect(thread.quit)
-        worker.failed.connect(thread.quit)
-        relay.progress.connect(self._on_scan_progress)
-        relay.finished.connect(self._on_scan_finished)
-        relay.failed.connect(self._on_scan_failed)
-        thread.finished.connect(self._on_scan_thread_finished)
-        self._scan_worker = worker
-        self._scan_thread = thread
-        self._scan_relay = relay
-        thread.start()
-
-    def _on_scan_thread_finished(self) -> None:
-        """Release the finished scan thread and its worker objects.
-
-        ``QThread.finished`` is emitted once the thread's event loop has
-        stopped, so the thread is guaranteed not running here. All references
-        are dropped *before* ``deleteLater()`` is scheduled; once the deferred
-        deletion runs, nothing in this window points at the QThread again,
-        so a deleted C++ object is never dereferenced.
-
-        The sender is used instead of ``self._scan_thread`` so an older thread
-        that finishes after a newer scan has started never deletes (or clears
-        the references of) the current scan.
-        """
-        thread = self.sender()
-        if not isinstance(thread, QThread):
-            return
-        if self._scan_thread is thread:
-            self._scan_thread = None
-            self._scan_worker = None
-            self._scan_relay = None
-        thread.deleteLater()
-
     def _on_scan_progress(self, generation: int, scanned: int, invalid: int, folder: str) -> None:
-        """Keep the user informed while a scan is in progress."""
-        del invalid
-        if generation != self._scan_generation:
-            return
+        """Keep the user informed while a scan is in progress.
+
+        Stale generations are already filtered by the scan controller.
+        """
+        del generation, invalid
         self._status_bar.showMessage(f"Scanning {folder}… {scanned} files")
 
     def _on_scan_finished(self, generation: int, folder: Path, tree: StudyTree) -> None:
@@ -470,10 +414,10 @@ class MainWindow(QMainWindow):
 
         A restored layout may hide the study explorer; once a scan actually
         loads studies the explorer is always brought back so the loaded data
-        can be browsed and selected.
+        can be browsed and selected. Stale generations are already filtered
+        by the scan controller.
         """
-        if generation != self._scan_generation:
-            return
+        del generation
         self._study_tree = tree
         self._study_explorer_panel.set_study_tree(tree)
         if not tree.has_content():
@@ -491,9 +435,11 @@ class MainWindow(QMainWindow):
         self._status_bar.showMessage(message)
 
     def _on_scan_failed(self, generation: int, message: str) -> None:
-        """Report a failed scan without interrupting the session."""
-        if generation != self._scan_generation:
-            return
+        """Report a failed scan without interrupting the session.
+
+        Stale generations are already filtered by the scan controller.
+        """
+        del generation
         self._status_bar.showMessage("Scan failed.")
         self._study_explorer_panel.show_initial()
         self._error_presenter.show_error(
@@ -505,11 +451,7 @@ class MainWindow(QMainWindow):
 
     def _stop_scan(self) -> None:
         """Abort a running scan and wait for its thread to finish."""
-        if self._scan_thread is None or not self._scan_thread.isRunning():
-            return
-        self._scan_generation += 1
-        self._scan_thread.requestInterruption()
-        self._scan_thread.wait(3000)
+        self._scan_controller.stop()
 
     def _on_series_activated(self, series: Series, index: int) -> None:
         """Display the activated series in the viewer and metadata panel."""
