@@ -525,29 +525,21 @@ class MainWindow(QMainWindow):
     def _update_series_info(self, series: Series) -> None:
         """Build and push the info overlay details for ``series``.
 
-        The domain model does not link a series back to its study, so the
-        patient/study rows are recovered by walking the last scanned tree;
-        series activated outside a scan (tests, future loaders) simply show
-        their own metadata.
+        The owning patient/study rows are resolved through the domain model;
+        series activated outside a scanned tree (tests, future loaders)
+        simply show their own metadata.
         """
         patient_name = patient_id = birth_date = patient_sex = study_description = ""
         tree = self._study_tree
         if tree is not None:
-            for patient in tree.patients:
-                for study in patient.studies:
-                    if any(
-                        member.series_instance_uid == series.series_instance_uid
-                        for member in study.series
-                    ):
-                        patient_name = patient.name
-                        patient_id = patient.patient_id
-                        birth_date = patient.birth_date
-                        patient_sex = patient.sex
-                        study_description = study.description
-                        break
-                else:
-                    continue
-                break
+            context = tree.find_series_context(series.series_instance_uid)
+            if context is not None:
+                patient, study = context
+                patient_name = patient.name
+                patient_id = patient.patient_id
+                birth_date = patient.birth_date
+                patient_sex = patient.sex
+                study_description = study.description
         self._viewer_panel.set_series_info(
             SeriesOverlayInfo(
                 patient_name=patient_name,

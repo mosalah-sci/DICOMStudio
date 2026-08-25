@@ -114,3 +114,15 @@ class StudyTree:
     def has_content(self) -> bool:
         """Return whether any valid DICOM study was discovered."""
         return len(self.patients) > 0
+
+    def find_series_context(self, series_uid: str) -> tuple[Patient, Study] | None:
+        """Return the ``(patient, study)`` owning ``series_uid``, or ``None``.
+
+        The series instance UID identifies a series within the discovered
+        catalog; the first match in patient and study order wins.
+        """
+        for patient in self.patients:
+            for study in patient.studies:
+                if any(member.series_instance_uid == series_uid for member in study.series):
+                    return patient, study
+        return None
