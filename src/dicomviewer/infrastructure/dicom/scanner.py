@@ -9,14 +9,14 @@ unreadable files are skipped and counted, never raised.
 from __future__ import annotations
 
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from loguru import logger
 
 from dicomviewer.application.discovery import DiscoveryError
-from dicomviewer.domain.studies import Image, Patient, Series, Study, StudyTree
+from dicomviewer.domain.studies import Image, Patient, Series, Study, StudyTree, sort_series_images
 
 _NON_DICOM_EXTENSIONS = frozenset(
     {
@@ -78,6 +78,14 @@ _IMAGE_TAGS = {
     "instance_number": (0x0020, 0x0013),
     "sop_uid": (0x0008, 0x0018),
 }
+
+# Geometry and series-descriptive tags (v1.4 M2). All optional: absence
+# degrades ordering to the InstanceNumber tier and leaves the overlay
+# body-part row empty, exactly as before.
+_SERIES_TAGS["body_part"] = (0x0018, 0x0015)
+_IMAGE_TAGS["position"] = (0x0020, 0x0032)
+_IMAGE_TAGS["orientation"] = (0x0020, 0x0037)
+_IMAGE_TAGS["slice_location"] = (0x0020, 0x1041)
 
 
 class PydicomStudyScanner:
@@ -163,8 +171,14 @@ class PydicomStudyScanner:
             series_number=_int(dataset, _SERIES_TAGS["series_number"]),
             modality=modality,
             series_description=_text(dataset, _SERIES_TAGS["description"]),
+            body_part=_text(dataset, _SERIES_TAGS["body_part"]),
             instance_number=_int(dataset, _IMAGE_TAGS["instance_number"]),
             sop_uid=sop_uid,
+            position=_floats(dataset, _IMAGE_TAGS["position"], expected=3),
+            orientation=_floats(dataset, _IMAGE_TAGS["orientation"], expected=6),
+            slice_location=_first_float_of(
+                _floats(dataset, _IMAGE_TAGS["slice_location"], expected=1)
+            ),
         )
 
     def _accumulate(self, patients: dict[str, _PatientAccumulator], instance: _Instance) -> None:
@@ -195,6 +209,7 @@ class PydicomStudyScanner:
                 series_number=instance.series_number,
                 modality=instance.modality,
                 description=instance.series_description,
+                body_part=instance.body_part,
             ),
         )
         series.images.append(
@@ -202,6 +217,9 @@ class PydicomStudyScanner:
                 path=instance.path,
                 instance_number=instance.instance_number or len(series.images) + 1,
                 sop_instance_uid=instance.sop_uid,
+                position=instance.position,
+                orientation=instance.orientation,
+                slice_location=instance.slice_location,
             )
         )
 
@@ -234,16 +252,14 @@ def _build_tree(
             for series_accumulator in sorted(
                 study_accumulator.series.values(), key=_series_sort_key
             ):
-                images: list[Image] = sorted(
-                    series_accumulator.images, key=lambda image: image.instance_number
-                )
                 series.append(
                     Series(
                         series_instance_uid=series_accumulator.series_uid,
                         modality=series_accumulator.modality,
                         series_number=series_accumulator.series_number or 0,
                         description=series_accumulator.description,
-                        images=tuple(images),
+                        images=sort_series_images(series_accumulator.images),
+                        body_part=series_accumulator.body_part,
                     )
                 )
             studies.append(
@@ -287,16 +303,20 @@ class _Instance:
     """Intermediate metadata for one validated DICOM file."""
 
     __slots__ = (
+        "body_part",
         "instance_number",
         "modality",
+        "orientation",
         "path",
         "patient_birth_date",
         "patient_id",
         "patient_name",
         "patient_sex",
+        "position",
         "series_description",
         "series_number",
         "series_uid",
+        "slice_location",
         "sop_uid",
         "study_date",
         "study_description",
@@ -320,8 +340,12 @@ class _Instance:
         series_number: int | None,
         modality: str,
         series_description: str,
+        body_part: str,
         instance_number: int | None,
         sop_uid: str | None,
+        position: tuple[float, ...] | None,
+        orientation: tuple[float, ...] | None,
+        slice_location: float | None,
     ) -> None:
         self.path = path
         self.patient_id = patient_id
@@ -336,8 +360,16 @@ class _Instance:
         self.series_number = series_number
         self.modality = modality
         self.series_description = series_description
+        self.body_part = body_part
         self.instance_number = instance_number
         self.sop_uid = sop_uid
+        self.position = (
+            (position[0], position[1], position[2])
+            if position is not None and len(position) == 3
+            else None
+        )
+        self.orientation = tuple(orientation) if orientation is not None else None
+        self.slice_location = slice_location
 
 
 class _PatientAccumulator:
@@ -383,7 +415,7 @@ class _StudyAccumulator:
 class _SeriesAccumulator:
     """Mutable accumulation target for one series."""
 
-    __slots__ = ("description", "images", "modality", "series_number", "series_uid")
+    __slots__ = ("body_part", "description", "images", "modality", "series_number", "series_uid")
 
     def __init__(
         self,
@@ -392,11 +424,13 @@ class _SeriesAccumulator:
         series_number: int | None,
         modality: str,
         description: str,
+        body_part: str,
     ) -> None:
         self.series_uid = series_uid
         self.series_number = series_number
         self.modality = modality
         self.description = description
+        self.body_part = body_part
         self.images: list[Image] = []
 
 
@@ -414,6 +448,46 @@ def _text(dataset: Any, tag: tuple[int, int]) -> str:
     if isinstance(value, str):
         return value
     return str(value)
+
+
+def _floats(
+    dataset: Any,
+    tag: tuple[int, int],
+    *,
+    expected: int,
+) -> tuple[float, ...] | None:
+    """Return a numeric multi-value tag as floats, or ``None``.
+
+    ``None`` is returned when the tag is absent, malformed, or does not
+    carry exactly ``expected`` values, letting callers fall back cleanly.
+    Handles both pydicom's parsed MultiValue objects and raw strings.
+    """
+    element = dataset.get(tag)
+    raw_value = element.value if element is not None else None
+    if raw_value is None:
+        return None
+    value: object = raw_value
+    if isinstance(value, bytes):
+        return None
+    text_items: list[str]
+    if isinstance(value, str):
+        text_items = value.split("\\")
+    elif isinstance(value, Sequence):
+        sequence = cast("Sequence[object]", value)
+        text_items = [str(item) for item in sequence]
+    else:
+        text_items = [str(value)]
+    if len(text_items) != expected:
+        return None
+    try:
+        return tuple(float(item) for item in text_items)
+    except (TypeError, ValueError):
+        return None
+
+
+def _first_float_of(values: tuple[float, ...] | None) -> float | None:
+    """Return the first float of a parsed tuple, or ``None``."""
+    return values[0] if values else None
 
 
 def _int(dataset: Any, tag: tuple[int, int]) -> int | None:

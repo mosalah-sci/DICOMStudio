@@ -491,6 +491,7 @@ class MainWindow(QMainWindow):
                 study_description=study_description,
                 series_description=series.description,
                 modality=series.modality,
+                body_part=series.body_part,
                 series_number=series.series_number,
             )
         )

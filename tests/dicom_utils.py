@@ -327,6 +327,10 @@ def write_ct_dataset(
     series_description: str = "",
     rows: int = 8,
     columns: int = 6,
+    image_position: tuple[float, float, float] | None = None,
+    image_orientation: tuple[float, ...] | None = None,
+    slice_location: float | None = None,
+    body_part: str = "",
 ) -> None:
     """Write a minimal, valid CT-like DICOM file to ``path``."""
     file_meta = FileMetaDataset()
@@ -346,6 +350,14 @@ def write_ct_dataset(
     dataset.StudyDate = study_date
     dataset.StudyDescription = study_description
     dataset.SeriesDescription = series_description
+    if body_part:
+        dataset.BodyPartExamined = body_part
+    if image_position is not None:
+        dataset.ImagePositionPatient = [float(v) for v in image_position]
+    if image_orientation is not None:
+        dataset.ImageOrientationPatient = [float(v) for v in image_orientation]
+    if slice_location is not None:
+        dataset.SliceLocation = float(slice_location)
     dataset.Rows = rows
     dataset.Columns = columns
     dataset.SamplesPerPixel = 1
@@ -417,6 +429,7 @@ def write_rich_ct_dataset(
     dataset.add_new((0x0009, 0x0010), "LO", "private-value")
     dataset.add_new((0x0028, 0x3006), "OW", b"\x00" * 128)
     dataset.save_as(path, enforce_file_format=True)
+
 
 # ---------------------------------------------------------------------------
 # v1.4 M1 — color/compression test builders
