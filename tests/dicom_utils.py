@@ -417,3 +417,126 @@ def write_rich_ct_dataset(
     dataset.add_new((0x0009, 0x0010), "LO", "private-value")
     dataset.add_new((0x0028, 0x3006), "OW", b"\x00" * 128)
     dataset.save_as(path, enforce_file_format=True)
+
+# ---------------------------------------------------------------------------
+# v1.4 M1 — color/compression test builders
+# ---------------------------------------------------------------------------
+
+
+def build_rgb_dataset(
+    pixels: np.ndarray,
+    *,
+    ybr: bool = False,
+    planar: int = 0,
+) -> Dataset:
+    """Return an uncompressed 3-sample dataset carrying ``pixels`` (r, c, 3)."""
+    rows, cols = pixels.shape[:2]
+    file_meta = FileMetaDataset()
+    file_meta.MediaStorageSOPClassUID = CT_SOP_CLASS_UID
+    file_meta.MediaStorageSOPInstanceUID = "1.2.3.4.5.6"
+    file_meta.TransferSyntaxUID = ExplicitVRLittleEndian
+    ds = Dataset()
+    ds.file_meta = file_meta
+    ds.Rows = rows
+    ds.Columns = cols
+    ds.SamplesPerPixel = 3
+    ds.PhotometricInterpretation = "YBR_FULL" if ybr else "RGB"
+    ds.PlanarConfiguration = planar
+    ds.BitsAllocated = 8
+    ds.BitsStored = 8
+    ds.HighBit = 7
+    ds.PixelRepresentation = 0
+    if planar:
+        ds.PixelData = np.ascontiguousarray(pixels.transpose(2, 0, 1)).tobytes()
+    else:
+        ds.PixelData = np.ascontiguousarray(pixels).tobytes()
+    return ds
+
+
+def write_rgb_dataset(
+    path: Path, pixels: np.ndarray, *, ybr: bool = False, planar: int = 0
+) -> None:
+    """Write an uncompressed color dataset to ``path``."""
+    build_rgb_dataset(pixels, ybr=ybr, planar=planar).save_as(path, enforce_file_format=True)
+
+
+def build_mono_dataset(
+    pixels: np.ndarray,
+    *,
+    monochrome1: bool = False,
+    rescale_slope: float = 1.0,
+    rescale_intercept: float = 0.0,
+) -> Dataset:
+    """Return an uncompressed grayscale dataset for compression round-trips."""
+    file_meta = FileMetaDataset()
+    file_meta.MediaStorageSOPClassUID = CT_SOP_CLASS_UID
+    file_meta.MediaStorageSOPInstanceUID = "1.2.3.4.5.6"
+    file_meta.TransferSyntaxUID = ExplicitVRLittleEndian
+    ds = Dataset()
+    ds.file_meta = file_meta
+    ds.Rows = pixels.shape[0]
+    ds.Columns = pixels.shape[1]
+    ds.SamplesPerPixel = 1
+    ds.PhotometricInterpretation = "MONOCHROME1" if monochrome1 else "MONOCHROME2"
+    ds.BitsAllocated = 16
+    ds.BitsStored = 16
+    ds.HighBit = 15
+    ds.PixelRepresentation = 0
+    ds.RescaleSlope = rescale_slope
+    ds.RescaleIntercept = rescale_intercept
+    ds.PixelData = np.asarray(pixels, dtype="<u2").tobytes()
+    return ds
+
+
+def write_encapsulated_dataset(
+    path: Path,
+    *,
+    payload: bytes,
+    transfer_syntax_uid: str,
+    rows: int,
+    columns: int,
+    samples: int = 1,
+    photometric: str = "MONOCHROME2",
+    rescale_slope: float = 1.0,
+    rescale_intercept: float = 0.0,
+) -> None:
+    """Write a dataset whose PixelData is an encapsulated compressed payload."""
+    from pydicom.encaps import encapsulate
+    from pydicom.uid import UID
+
+    file_meta = FileMetaDataset()
+    file_meta.MediaStorageSOPClassUID = CT_SOP_CLASS_UID
+    file_meta.MediaStorageSOPInstanceUID = "1.2.3.4.5.6"
+    file_meta.TransferSyntaxUID = UID(transfer_syntax_uid)
+    ds = Dataset()
+    ds.file_meta = file_meta
+    ds.Rows = rows
+    ds.Columns = columns
+    ds.SamplesPerPixel = samples
+    ds.PhotometricInterpretation = photometric
+    ds.PlanarConfiguration = 0
+    ds.BitsAllocated = 8 if samples > 1 else 16
+    ds.BitsStored = ds.BitsAllocated
+    ds.HighBit = ds.BitsAllocated - 1
+    ds.PixelRepresentation = 0
+    ds.RescaleSlope = rescale_slope
+    ds.RescaleIntercept = rescale_intercept
+    ds.PixelData = encapsulate([payload])
+    ds.save_as(path, enforce_file_format=True)
+
+
+def jpeg_payload(width: int = 8, height: int = 6, quality: int = 90) -> bytes:
+    """Encode a deterministic gradient frame as JFIF/JPEG bytes via Qt."""
+    from PySide6.QtCore import QBuffer, QIODevice
+    from PySide6.QtGui import QColor, QImage, QPainter
+
+    image = QImage(width, height, QImage.Format.Format_RGB32)
+    painter = QPainter(image)
+    for x in range(width):
+        shade = int(255 * x / max(width - 1, 1))
+        painter.fillRect(x, 0, 1, height, QColor.fromRgb(shade, 40, 255 - shade))
+    painter.end()
+    buffer = QBuffer()
+    buffer.open(QIODevice.OpenModeFlag.WriteOnly)
+    image.save(buffer, "JPEG", quality)
+    return bytes(buffer.data())

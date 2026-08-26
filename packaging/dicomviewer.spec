@@ -24,6 +24,16 @@ datas = collect_data_files("dicomviewer")
 # infrastructure, so static analysis cannot discover it on its own.
 hiddenimports = collect_submodules("pydicom")
 
+# Optional pixel-codec plugins (v1.4 M1). PyInstaller cannot see their
+# entry points; include each only when installed so frozen builds keep
+# compressed decoding while bare builds stay valid.
+for _codec in ("pylibjpeg_libjpeg", "pylibjpeg_openjpeg"):
+    try:
+        __import__(_codec)
+        hiddenimports.append(_codec)
+    except ImportError:
+        pass
+
 a = Analysis(
     [str(_SOURCE_DIR / "dicomviewer" / "main.py")],
     pathex=[str(_SOURCE_DIR)],

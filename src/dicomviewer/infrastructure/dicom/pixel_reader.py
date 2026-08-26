@@ -4,6 +4,12 @@ Decodes a single instance into a :class:`PixelArray` carrying the raw frame
 plus the metadata the renderer needs (rescale, window and photometric
 interpretation). Formats that cannot be displayed raise
 :class:`UnsupportedPixelFormatError` instead of crashing the viewer.
+
+Compressed transfer syntaxes are decoded through pydicom's pixel-data
+handlers when an optional codec plugin is installed
+(``dicomviewer[codec-jpeg]`` / ``dicomviewer[codec-j2k]``). Missing codecs
+remain typed, user-readable failures that name the transfer syntax and the
+extra that provides it.
 """
 
 from __future__ import annotations
@@ -20,6 +26,32 @@ from dicomviewer.application.viewing import (
 )
 from dicomviewer.domain.studies import Image
 
+# Transfer-syntax families used only to enrich failure messages with the
+# optional extra that provides decoding support. Actual decoding capability
+# is decided by pydicom's handler availability at runtime.
+_JPEG_TS_UIDS = frozenset(
+    {
+        "1.2.840.10008.1.2.4.50",  # JPEG Baseline
+        "1.2.840.10008.1.2.4.51",  # JPEG Extended
+        "1.2.840.10008.1.2.4.57",  # JPEG Lossless
+        "1.2.840.10008.1.2.4.80",  # JPEG-LS Lossless
+        "1.2.840.10008.1.2.4.81",  # JPEG-LS Near-Lossless
+    }
+)
+_J2K_TS_UIDS = frozenset(
+    {
+        "1.2.840.10008.1.2.4.90",  # JPEG 2000 Lossless
+        "1.2.840.10008.1.2.4.91",  # JPEG 2000
+        "1.2.840.10008.1.2.4.201",  # HTJ2K Lossless
+        "1.2.840.10008.1.2.4.202",  # HTJ2K Lossless RPCL
+    }
+)
+# Uncompressed YBR photometrics. pydicom's native handler converts these to
+# RGB inside ``pixel_array`` (PS3.3 C.7.6.3.1 full-range), and compressed
+# YBR arrives as RGB from codec handlers, so the decoder only has to
+# normalize the declared photometric to match the delivered payload.
+_YBR_PREFIX = "YBR"
+
 
 def _read_full(path: Path) -> Any:
     """Read a full DICOM dataset (including pixel data) as untyped data."""
@@ -27,6 +59,26 @@ def _read_full(path: Path) -> Any:
 
     pydicom = importlib.import_module("pydicom")
     return pydicom.dcmread(path)
+
+
+def _transfer_syntax_uid(dataset: Any) -> str:
+    """Return the transfer syntax UID string, or ``''`` when absent."""
+    file_meta = getattr(dataset, "file_meta", None)
+    uid = getattr(file_meta, "TransferSyntaxUID", None)
+    # pydicom's UID subclasses str; there is no separate ``value`` attribute.
+    return str(uid) if uid is not None else ""
+
+
+def _unsupported_message(path: Path, transfer_syntax: str, exc: BaseException) -> str:
+    """Build the typed failure message, naming the missing codec extra."""
+    base = f"Unsupported pixel format in {path}: {exc}"
+    if not transfer_syntax:
+        return base
+    if transfer_syntax in _JPEG_TS_UIDS:
+        return f"{base} [transfer syntax {transfer_syntax} needs 'codec-jpeg']"
+    if transfer_syntax in _J2K_TS_UIDS:
+        return f"{base} [transfer syntax {transfer_syntax} needs 'codec-j2k']"
+    return f"{base} [transfer syntax {transfer_syntax}]"
 
 
 def _first_float(value: object | None) -> float | None:
@@ -45,6 +97,13 @@ def _first_float(value: object | None) -> float | None:
         return None
 
 
+def _convert_ybr_photometric(photometric: str) -> str:
+    """Return ``RGB`` for YBR input, whose payload pydicom already converted."""
+    if photometric.startswith(_YBR_PREFIX):
+        return "RGB"
+    return photometric
+
+
 class PydicomPixelDecoder:
     """Pixel decoder backed by pydicom."""
 
@@ -58,11 +117,12 @@ class PydicomPixelDecoder:
             ) from exc
         if not hasattr(dataset, "PixelData"):
             raise UnsupportedPixelFormatError(f"No pixel data in {image.path}")
+        transfer_syntax = _transfer_syntax_uid(dataset)
         try:
             frame = np.asarray(dataset.pixel_array)
         except Exception as exc:
             raise UnsupportedPixelFormatError(
-                f"Unsupported pixel format in {image.path}: {exc}"
+                _unsupported_message(image.path, transfer_syntax, exc)
             ) from exc
 
         samples = int(getattr(dataset, "SamplesPerPixel", 1) or 1)
@@ -70,6 +130,19 @@ class PydicomPixelDecoder:
             getattr(dataset, "PhotometricInterpretation", "MONOCHROME2") or "MONOCHROME2"
         )
         bits_allocated = int(getattr(dataset, "BitsAllocated", 16) or 16)
+
+        if (
+            samples > 1
+            and frame.ndim == 3
+            and frame.shape[0] == samples
+            and frame.shape[-1] != samples
+        ):
+            # Planar configuration (per-plane storage) normalized to the
+            # interleaved layout the rest of the pipeline expects.
+            frame = np.moveaxis(frame, 0, -1)
+
+        if samples > 1:
+            photometric = _convert_ybr_photometric(photometric)
 
         if frame.ndim == 2:
             pixels, width, height = frame, frame.shape[1], frame.shape[0]

@@ -29,6 +29,18 @@ dependencies = [
 [project.scripts]
 dicomviewer = "dicomviewer.main:main"
 
+[project.optional-dependencies]
+# Pixel-codec plugins for compressed transfer syntaxes. Both are optional at
+# runtime: unsupported compression stays a typed, user-readable failure.
+codec-jpeg = [
+    "pylibjpeg>=2.0",
+    "pylibjpeg-libjpeg>=2.3",
+]
+codec-j2k = [
+    "pylibjpeg>=2.0",
+    "pylibjpeg-openjpeg>=1.2",
+]
+
 [dependency-groups]
 dev = [
     "pytest>=8.3",
@@ -36,6 +48,11 @@ dev = [
     "ruff>=0.6",
     "pyright>=1.1.360",
     "pyinstaller>=6.11",
+    # Codec plugins duplicated into dev so the suite exercises compressed
+    # decoding deterministically in CI.
+    "pylibjpeg>=2.0",
+    "pylibjpeg-libjpeg>=2.3",
+    "pylibjpeg-openjpeg>=1.2",
 ]
 
 [build-system]
